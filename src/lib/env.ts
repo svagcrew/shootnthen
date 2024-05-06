@@ -13,7 +13,7 @@ const findEnvFilePath = (dir: string, pathPart: string): string | null => {
   }
   return findEnvFilePath(path.dirname(dir), pathPart)
 }
-const envFilePath = findEnvFilePath(__dirname, '.env')
+const envFilePath = findEnvFilePath(process.cwd(), '.env.shootnthen') || findEnvFilePath(__dirname, '.env.shootnthen')
 if (envFilePath) {
   dotenv.config({ path: envFilePath, override: true })
   dotenv.config({ path: `${envFilePath}.${process.env.NODE_ENV}`, override: true })

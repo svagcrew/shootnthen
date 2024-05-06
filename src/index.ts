@@ -1,7 +1,7 @@
 import 'source-map-support/register'
 
 import { getConfig } from '@/lib/config'
-import { validateEnv } from '@/lib/env'
+import { getEnv, validateEnv } from '@/lib/env'
 import dedent from 'dedent'
 import { defineCliApp, log } from 'svag-cli-utils'
 
@@ -17,10 +17,14 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       log.black(JSON.stringify(config, null, 2))
       break
     }
+    case 'e': {
+      log.black(getEnv('OPENAI_API_KEY'))
+      break
+    }
     case 'h': {
       log.black(dedent`Commands:
+        e - show env OPENAI_API_KEY
         c - show config
-        
         h — help
         `)
       break

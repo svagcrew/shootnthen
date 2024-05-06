@@ -3,15 +3,19 @@ import path from 'path'
 import { getDataFromFile, stringsToLikeArrayString } from 'svag-cli-utils'
 import { z } from 'zod'
 
-export const zConfig = z.object({})
+export const zConfig = z.object({
+  contentDir: z.string().min(1),
+})
 export type Config = z.infer<typeof zConfig>
-const defaultConfig: Config = {}
+const defaultConfig: Config = {
+  contentDir: './content',
+}
 
 const findAllConfigsPaths = async ({ dirPath }: { dirPath: string }) => {
   const configPaths: string[] = []
   let dirPathHere = path.resolve('/', dirPath)
   for (let i = 0; i < 777; i++) {
-    const maybeConfigGlob = `${dirPathHere}/snt.config.(js|ts|yml|yaml|json)`
+    const maybeConfigGlob = `${dirPathHere}/shootnthen.config.(js|mjs|ts|yml|yaml|json)`
     const maybeConfigPath = (
       await fg([maybeConfigGlob], {
         onlyFiles: true,
@@ -50,5 +54,6 @@ export const getConfig = async ({ dirPath }: { dirPath: string }) => {
     throw new Error(`Invalid core config file: "${configPath}": ${configMergedValidated.error.message}`)
   }
   const config = configMergedValidated.data
+  config.contentDir = path.resolve(path.dirname(configPath), config.contentDir)
   return { config }
 }
