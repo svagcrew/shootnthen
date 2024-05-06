@@ -1,0 +1,11 @@
+{
+  "extends": "svag-ts/configs/universal.json",
+  "include": ["src"],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "outDir": "./dist"
+  }
+}
