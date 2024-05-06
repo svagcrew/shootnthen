@@ -20,6 +20,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     case 'h': {
       log.black(dedent`Commands:
         c - show config
+        
         h — help
         `)
       break
