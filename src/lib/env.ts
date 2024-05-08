@@ -20,13 +20,14 @@ if (envFilePath) {
 }
 
 const zEnv = z.object({
-  OPENAI_API_KEY: z.string(),
+  ELEVENLABS_API_KEY: z.string(),
+  KINESCOPE_API_KEY: z.string(),
 })
 
 type Env = z.infer<typeof zEnv>
 
 export const envRaw = {
-  OPENAI_API_KEY: process.env.I777N_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+  ...process.env,
 }
 
 export const validateEnv = () => {
