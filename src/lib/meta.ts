@@ -7,6 +7,23 @@ import z from 'zod'
 
 export const zMeta = z.object({
   title: z.string().optional(),
+  elevenlabs: z
+    .object({
+      dubbings: z
+        .array(
+          z.object({
+            srcUrl: z.string().nullable().default(null),
+            srcFilePath: z.string().nullable().default(null),
+            distFilePath: z.string().nullable().default(null),
+            id: z.string(),
+            srcLang: z.string(),
+            distLang: z.string(),
+            duration: z.number(),
+          })
+        )
+        .default([]),
+    })
+    .default({ dubbings: [] }),
   kinescope: z
     .object({
       videos: z

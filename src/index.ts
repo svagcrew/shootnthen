@@ -171,6 +171,125 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       log.green(audioFilePath)
       break
     }
+    case 'elevenlabs-create-dubbing':
+    case 'elcd': {
+      const filePathRaw = args[0]
+      const srcLangRaw = getFlagAsString({
+        flags,
+        keys: ['src-lang', 'sl'],
+        coalesce: undefined,
+      })
+      const distLangRaw = getFlagAsString({
+        flags,
+        keys: ['dist-lang', 'dl'],
+        coalesce: undefined,
+      })
+      const { srcLang, distLang, filePath } = z
+        .object({
+          srcLang: zLangProcessed,
+          distLang: zLangProcessed,
+          filePath: z.string(),
+        })
+        .parse({
+          srcLang: srcLangRaw,
+          distLang: distLangRaw,
+          filePath: filePathRaw,
+        })
+      const parsed = parseFileName(filePath)
+      if (parsed.ext !== 'mp3') {
+        log.red('File is not mp3')
+        break
+      }
+      const result = await elevenlabs.createDubbing({
+        distLang,
+        srcLang,
+        filePath,
+        config,
+      })
+      log.green(result)
+      break
+    }
+    case 'elevenlabs-create-dubbing-by-url':
+    case 'elcdu': {
+      const urlRaw = args[0]
+      const filePathRaw = getFlagAsString({
+        flags,
+        keys: ['file', 'f'],
+        coalesce: undefined,
+      })
+      const srcLangRaw = getFlagAsString({
+        flags,
+        keys: ['src-lang', 'sl'],
+        coalesce: undefined,
+      })
+      const distLangRaw = getFlagAsString({
+        flags,
+        keys: ['dist-lang', 'dl'],
+        coalesce: undefined,
+      })
+      const { srcLang, distLang, filePath, url } = z
+        .object({
+          srcLang: zLangProcessed,
+          distLang: zLangProcessed,
+          filePath: z.string(),
+          url: z.string(),
+        })
+        .parse({
+          srcLang: srcLangRaw,
+          distLang: distLangRaw,
+          filePath: filePathRaw,
+          url: urlRaw,
+        })
+      const parsed = parseFileName(filePath)
+      if (parsed.ext !== 'mp3') {
+        log.red('File is not mp3')
+        break
+      }
+      const result = await elevenlabs.createDubbingByUrl({
+        distLang,
+        srcLang,
+        filePath,
+        config,
+        url,
+      })
+      log.green(result)
+      break
+    }
+    case 'elevenlabs-get-dubbing':
+    case 'elgd': {
+      const dubbingId = args[0]
+      const result = await elevenlabs.getDubbing({ dubbingId })
+      log.green(result)
+      break
+    }
+    case 'elevenlabs-download-dubbing':
+    case 'eldd': {
+      const filePathRaw = getFlagAsString({
+        flags,
+        keys: ['file', 'f'],
+        coalesce: undefined,
+      })
+      const dubbingIdRaw = getFlagAsString({
+        flags,
+        keys: ['dubbing', 'd'],
+        coalesce: undefined,
+      })
+      const langRaw = getFlagAsString({
+        flags,
+        keys: ['lang', 'l'],
+        coalesce: undefined,
+      })
+      const { dubbingId, filePath, lang } = z
+        .object({ dubbingId: z.string(), filePath: z.string(), lang: zLangProcessed })
+        .parse({
+          dubbingId: dubbingIdRaw,
+          filePath: filePathRaw,
+          lang: langRaw,
+        })
+      const result = await elevenlabs.downloadDubbing({ dubbingId, config, filePath, lang })
+      log.green(result)
+      break
+    }
     case 'dub-audio':
     case 'da': {
       const srcFilePath = args[0]
@@ -198,11 +317,13 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           srcLang: srcLangRaw || parsed.langSingle,
           distLang: distLangRaw,
         })
-      await elevenlabs.createDubbingProject({
+      await elevenlabs.createDubbing({
         distLang,
         srcLang,
-        srcFilePath,
+        filePath: srcFilePath,
+        config,
       })
+      // TODO:ASAP
       break
     }
     case 'apply-audios':
@@ -230,7 +351,18 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     }
     case 'h': {
       log.black(dedent`Commands:
-        dg | download-from-google-drive — download file from Google Drive by 
+        dg | download-from-google-drive --dir <dirId> <search>
+        ug | upload-to-google-drive --dir <dirId> <files>
+        sg | search-google-drive --dir <dirId> <search>
+        uk | upload-to-kinescope --parent <parentId> --video <videoId> <filePath>
+        lkp | list-kinescope-projects
+        ea | extract-audio --lang <lang> <filePath>
+        elcd | elevenlabs-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
+        elcdu | elevenlabs-create-dubbing-by-url --src-lang <srcLang> --dist-lang <distLang> --file <filePath> <url>
+        elgd | elevenlabs-get-dubbing <dubbingId>
+        eldd | elevenlabs-download-dubbing --dubbing <dubbingId> --file <filePath> --lang <lang>
+        da | dub-audio --src-lang <srcLang> --dist-lang <distLang> <filePath>
+        aa | apply-audios --langs <langs> <inputVideoPath>
         h — help
         `)
       break

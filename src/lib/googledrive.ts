@@ -156,9 +156,7 @@ const uploadFile = async ({ config, filePath, dirId }: { config: Config; filePat
   if (!id) {
     throw new Error('No id after upload')
   }
-  const newFilesWithoutOldRecord = meta.googleDrive.files.filter((file) => file.name !== fileBasename)
-  const newFilesWithNewRecord = [...newFilesWithoutOldRecord, { id, name: fileBasename }]
-  meta.googleDrive.files = newFilesWithNewRecord
+  meta.googleDrive.files.push({ id, name: fileBasename })
   updateMeta({ meta, metaFilePath })
   return {
     filePath: filePathAbs,

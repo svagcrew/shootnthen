@@ -23,6 +23,9 @@ dependencies:
   fluent-ffmpeg:
     specifier: ^2.1.2
     version: 2.1.2
+  form-data:
+    specifier: ^4.0.0
+    version: 4.0.0
   formdata-node:
     specifier: ^6.0.3
     version: 6.0.3
@@ -35,6 +38,9 @@ dependencies:
   lodash:
     specifier: ^4.17.21
     version: 4.17.21
+  node-fetch:
+    specifier: ^2.7.0
+    version: 2.7.0
   source-map-support:
     specifier: ^0.5.21
     version: 0.5.21
