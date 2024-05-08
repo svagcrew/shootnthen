@@ -21,6 +21,8 @@ if (envFilePath) {
 
 const zEnv = z.object({
   ELEVENLABS_API_KEY: z.string(),
+  ELEVENLABS_EMAIL: z.string(),
+  ELEVENLABS_PASSWORD: z.string(),
   KINESCOPE_API_KEY: z.string(),
 })
 
@@ -34,6 +36,6 @@ export const validateEnv = () => {
   return zEnv.parse(envRaw)
 }
 
-export const getEnv = (key: keyof Env) => {
-  return zEnv.parse(envRaw)[key]
+export const getEnv = <T extends keyof Env>(key: T): Env[T] => {
+  return zEnv.shape[key].parse(envRaw[key])
 }

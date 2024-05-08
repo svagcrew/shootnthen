@@ -290,6 +290,44 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       log.green(result)
       break
     }
+    case 'elevenlabs-create-dubbing-with-browser':
+    case 'elcdb': {
+      const filePathRaw = args[0]
+      const srcLangRaw = getFlagAsString({
+        flags,
+        keys: ['src-lang', 'sl'],
+        coalesce: undefined,
+      })
+      const distLangRaw = getFlagAsString({
+        flags,
+        keys: ['dist-lang', 'dl'],
+        coalesce: undefined,
+      })
+      const { srcLang, distLang, filePath } = z
+        .object({
+          srcLang: zLangProcessed,
+          distLang: zLangProcessed,
+          filePath: z.string(),
+        })
+        .parse({
+          srcLang: srcLangRaw,
+          distLang: distLangRaw,
+          filePath: filePathRaw,
+        })
+      const parsed = parseFileName(filePath)
+      if (parsed.ext !== 'mp3') {
+        log.red('File is not mp3')
+        break
+      }
+      const result = await elevenlabs.createDubbingWithBrowser({
+        distLang,
+        srcLang,
+        filePath,
+        config,
+      })
+      log.green(result)
+      break
+    }
     case 'dub-audio':
     case 'da': {
       const srcFilePath = args[0]
@@ -359,6 +397,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         ea | extract-audio --lang <lang> <filePath>
         elcd | elevenlabs-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
         elcdu | elevenlabs-create-dubbing-by-url --src-lang <srcLang> --dist-lang <distLang> --file <filePath> <url>
+        elcdb | elevenlabs-create-dubbing-with-browser --src-lang <srcLang> --dist-lang <distLang> <filePath>
         elgd | elevenlabs-get-dubbing <dubbingId>
         eldd | elevenlabs-download-dubbing --dubbing <dubbingId> --file <filePath> --lang <lang>
         da | dub-audio --src-lang <srcLang> --dist-lang <distLang> <filePath>
