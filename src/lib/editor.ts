@@ -4,7 +4,7 @@ import { fromRawLang, Lang } from '@/lib/utils'
 import ffmpeg from 'fluent-ffmpeg'
 import langCodesLib from 'langs'
 import path from 'path'
-import { isFileExistsSync, spawn } from 'svag-cli-utils'
+import { isFileExistsSync, log, spawn } from 'svag-cli-utils'
 
 export const extractAudioSimple = async ({
   inputVideoPath,
@@ -73,11 +73,14 @@ export const applyAudiosToVideo = async ({
   inputVideoPath,
   config,
   langs,
+  verbose,
 }: {
   inputVideoPath: string
   config: Config
   langs: Lang[]
+  verbose?: boolean
 }) => {
+  verbose && log.normal('Applying audios to video', { inputVideoPath, langs })
   const parsed = parseFileName(inputVideoPath)
   if (langs.length === 0) {
     throw new Error('No languages provided')
@@ -97,5 +100,6 @@ export const applyAudiosToVideo = async ({
     inputAudios.push({ lang, audioPath: audioFilePath })
   }
   await applyAudiosToVideoSimple({ inputVideoPath, inputAudios, outputVideoPath })
+  verbose && log.normal('Applied audios to video', { outputVideoPath })
   return { outputVideoPath }
 }

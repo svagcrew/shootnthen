@@ -20,6 +20,7 @@
   "bin": {
     "snt": "./bin/index.js"
   },
+  "main": "./dist/exports.js",
   "files": [
     "./bin/**/*",
     "./dist/**/*"

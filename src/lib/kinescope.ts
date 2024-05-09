@@ -12,12 +12,22 @@ const uploadFile = async ({
   filePath,
   parentId,
   videoId,
+  verbose,
+  title,
 }: {
   config: Config
   filePath: string
   parentId?: string
   videoId?: string
+  verbose?: boolean
+  title?: string
 }) => {
+  verbose &&
+    log.normal(`Uploading file to Kinescope`, {
+      filePath,
+      parentId,
+      videoId,
+    })
   if (!videoId && !parentId) {
     throw new Error('parentId or videoId required')
   }
@@ -27,7 +37,7 @@ const uploadFile = async ({
   if (ext !== 'mp4') {
     throw new Error('Only mp4 files allowed')
   }
-  const title = meta.title || name
+  title = title || meta.title || name
 
   const fileDataBinary = fs.createReadStream(filePathAbs)
   const res = await (async () => {
@@ -46,8 +56,8 @@ const uploadFile = async ({
         data: fileDataBinary,
       })
     } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+      if (isAxiosError(err) && err.response?.data) {
+        throw new Error(JSON.stringify(err.response.data, null, 2))
       }
       throw err
     }
@@ -55,9 +65,11 @@ const uploadFile = async ({
 
   const id = res.data.data.id
   if (!id) {
-    throw new Error('No id after upload')
+    throw new Error(`No id after upload, ${JSON.stringify(res.data, null, 2)}`)
   }
+  verbose && log.normal('Uploaded file to Kinescope', { id, filePath: filePathAbs })
 
+  verbose && log.normal('Changing title in Kinescope')
   try {
     await axios({
       method: 'patch',
@@ -71,13 +83,14 @@ const uploadFile = async ({
     })
   } catch (err: any) {
     if (isAxiosError(err)) {
-      throw log.red(JSON.stringify(err.response?.data, null, 2))
+      log.red(JSON.stringify(err.response?.data, null, 2))
     }
     log.red(err?.message || err)
   }
+  verbose && log.normal('Changed title in Kinescope')
 
   const newFilesWithoutOldRecord = meta.kinescope.videos.filter((file) => file.id !== id)
-  const newFilesWithNewRecord = [...newFilesWithoutOldRecord, { id }]
+  const newFilesWithNewRecord = [...newFilesWithoutOldRecord, { id, filePath: filePathAbs }]
   meta.kinescope.videos = newFilesWithNewRecord
   updateMeta({ meta, metaFilePath })
   return {

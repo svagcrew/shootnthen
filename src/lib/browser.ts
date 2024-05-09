@@ -8,7 +8,7 @@ export const getBrowser = async () => {
     return openedBrowser
   }
   const browser = await puppeteer.launch(
-    Math.random()
+    !Math.random()
       ? {
           headless: false,
           userDataDir: path.resolve(__dirname, './pupdata'),

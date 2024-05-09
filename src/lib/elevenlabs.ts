@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-catch */
 import { closeBrowser, visitPage } from '@/lib/browser'
 import { Config } from '@/lib/config'
 import { getEnv } from '@/lib/env'
@@ -7,9 +8,9 @@ import axios, { isAxiosError } from 'axios'
 import FormData from 'form-data'
 import fs from 'fs'
 import path from 'path'
+import { pipeline } from 'stream'
 import { isFileExists, log } from 'svag-cli-utils'
 import util from 'util'
-import { pipeline } from 'stream'
 const streamPipeline = util.promisify(pipeline)
 
 const createDubbing = async ({
@@ -184,7 +185,8 @@ const createDubbingByUrl = async ({
   return { dubbingId, duration, srcLang, distLang }
 }
 
-const getDubbing = async ({ dubbingId }: { dubbingId: string }) => {
+const getDubbing = async ({ dubbingId, verbose }: { dubbingId: string; verbose?: boolean }) => {
+  verbose && log.normal('Getting dubbing', dubbingId)
   const apiKey = getEnv('ELEVENLABS_API_KEY')
   const res = await (async () => {
     try {
@@ -215,7 +217,9 @@ const getDubbing = async ({ dubbingId }: { dubbingId: string }) => {
   if (!targetLangs) {
     throw new Error('No targetLangs in response')
   }
-  return { name, status, targetLangs, error } as {
+  const result = { name, status, targetLangs, error }
+  verbose && log.normal('Got dubbing', result)
+  return result as {
     name: string
     status: 'dubbing' | 'dubbed'
     targetLangs: string[]
@@ -223,17 +227,45 @@ const getDubbing = async ({ dubbingId }: { dubbingId: string }) => {
   }
 }
 
+const waitUntilDubbed = async ({
+  dubbingId,
+  verbose,
+}: {
+  dubbingId: string
+  verbose?: boolean
+}): Promise<{
+  name: string
+  status: 'dubbed'
+  targetLangs: string[]
+  error: string | undefined | null
+}> => {
+  const result = await getDubbing({ dubbingId, verbose })
+  if (result.status === 'dubbed') {
+    verbose && log.normal('Dubbed', result)
+    return { ...result, status: 'dubbed' }
+  }
+  if (result.status !== 'dubbing') {
+    throw new Error(`Unexpected status: ${result.status} ${JSON.stringify(result)}`)
+  }
+  verbose && log.normal('Waiting for dubbing', dubbingId)
+  await wait(10)
+  return waitUntilDubbed({ dubbingId, verbose })
+}
+
 const downloadDubbing = async ({
   config,
   dubbingId,
   lang,
   filePath,
+  verbose,
 }: {
   config: Config
   dubbingId: string
   lang: LangProcessed
   filePath: string
+  verbose?: boolean
 }) => {
+  verbose && log.normal('Downloading dubbing', dubbingId, lang)
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
   const apiKey = getEnv('ELEVENLABS_API_KEY')
@@ -263,25 +295,26 @@ const downloadDubbing = async ({
     exRecord.distFilePath = filePathAbs
     updateMeta({ meta, metaFilePath })
   }
+  verbose && log.normal('Downloaded dubbing', dubbingId, lang)
   return {
     filePath: filePathAbs,
   }
 }
 
-const authorize = async () => {
+const authorize = async ({ verbose }: { verbose?: boolean } = {}) => {
   const email = getEnv('ELEVENLABS_EMAIL')
   const password = getEnv('ELEVENLABS_PASSWORD')
   let page = await visitPage('https://elevenlabs.io/app/dubbing')
 
   const dubbingProjectNameInputSelector = '[aria-label="Dubbing Project Name (Optional)"]'
-
+  verbose && log.normal('Checking if already authorized')
   const signInButtonSelector = '[data-testid="sign-in-button"]'
   try {
     await page.waitForSelector(signInButtonSelector)
   } catch (err) {
     try {
       await page.waitForSelector(dubbingProjectNameInputSelector)
-      log.gray('Already signed in')
+      verbose && log.normal('Already authorized')
       return
     } catch (err) {
       throw new Error('No account button and no sign in button')
@@ -291,6 +324,7 @@ const authorize = async () => {
   if (!signInButton) {
     throw new Error('No sign in button')
   }
+  verbose && log.normal('Start signing in')
   await signInButton.click()
 
   const emailInputSelector = '[type="email"]'
@@ -309,6 +343,7 @@ const authorize = async () => {
 
   try {
     await page.waitForSelector(dubbingProjectNameInputSelector)
+    verbose && log.normal('Signed in')
   } catch (err) {
     throw new Error('No dubbing project name input after login')
   }
@@ -328,13 +363,16 @@ const createDubbingWithBrowser = async ({
   filePath,
   srcLang,
   distLang,
+  verbose,
 }: {
   config: Config
   filePath: string
   srcLang: LangProcessed
   distLang: LangProcessed
+  verbose?: boolean
 }) => {
   try {
+    verbose && log.normal('Creating dubbing with browser', filePath, srcLang, distLang)
     const filePathAbs = path.resolve(config.contentDir, filePath)
     const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
     const parsedName = parseFileName(filePath)
@@ -349,6 +387,8 @@ const createDubbingWithBrowser = async ({
 
     await authorize()
     let page = await visitPage('https://elevenlabs.io/app/dubbing')
+
+    verbose && log.normal('Filling form')
 
     const dubbingProjectNameInputSelector = '[aria-label="Dubbing Project Name (Optional)"]'
     await page.waitForSelector(dubbingProjectNameInputSelector)
@@ -387,10 +427,12 @@ const createDubbingWithBrowser = async ({
       )
     )
     await createButton.click()
-    await wait(5)
+    verbose && log.normal('Waiting dubbing id')
 
+    await wait(5)
     await page.close()
     page = await visitPage('https://elevenlabs.io/app/dubbing')
+    await wait(5)
 
     const projectDubbingNameLabelSelector = `text/${projectName}`
     const projectDubbingNameLabel = getNonNullable(await page.waitForSelector(projectDubbingNameLabelSelector))
@@ -421,17 +463,52 @@ const createDubbingWithBrowser = async ({
     })
     updateMeta({ meta, metaFilePath })
     closeBrowser()
+    verbose && log.normal('Dubbing created')
     return { dubbingId, duration, srcLang, distLang }
   } catch (err) {
-    closeBrowser()
+    // closeBrowser()
     throw err
   }
 }
 
+const createWaitDownloadDubbing = async ({
+  config,
+  srcFilePath,
+  distFilePath,
+  srcLang,
+  distLang,
+  verbose,
+}: {
+  config: Config
+  srcFilePath: string
+  distFilePath: string
+  srcLang: LangProcessed
+  distLang: LangProcessed
+  verbose?: boolean
+}) => {
+  const { dubbingId } = await elevenlabs.createDubbingWithBrowser({
+    distLang,
+    srcLang,
+    filePath: srcFilePath,
+    config,
+    verbose,
+  })
+  await elevenlabs.waitUntilDubbed({ dubbingId, verbose })
+  await elevenlabs.downloadDubbing({
+    dubbingId,
+    config,
+    filePath: distFilePath,
+    lang: distLang,
+    verbose,
+  })
+}
+
 export const elevenlabs = {
+  waitUntilDubbed,
   createDubbing,
   createDubbingByUrl,
   getDubbing,
   downloadDubbing,
   createDubbingWithBrowser,
+  createWaitDownloadDubbing,
 }

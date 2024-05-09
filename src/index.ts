@@ -11,24 +11,18 @@ import { parseFileName } from '@/lib/meta'
 import { elevenlabs } from '@/lib/elevenlabs'
 import z from 'zod'
 import { kinescope } from '@/lib/kinescope'
+import { removeVideosAndAudios } from '@/lib/fs'
+import path from 'path'
 
-// TODO: delete all files locally except jsons
-// TODO: playground code implementation for sgrd course
+// TODO: translate first 2 videos
 
-// TODO: get file names of all course
-
-// TODO: translate first 3 videos
-
-// TODO: dub audio by elevenlabs
 // TODO: translate again and again
 
 // TODO: download video from loom
-// TODO: extract first audio from video by ffmpeg
 // TODO: auphonic audio
-// TODO: replace audio in video by ffmpeg
-// TODO: meta auphonic, loom, youtube
 // TODO: upload file to youtube
-// TODO: add one audio to video by ffmpeg
+// TODO: add verbose flag
+// TODO: boom script: loom → auphonic+elevenlabs → gdrive → youtube/kinescope
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
@@ -330,8 +324,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     }
     case 'dub-audio':
     case 'da': {
-      const srcFilePath = args[0]
-      const parsed = parseFileName(srcFilePath)
+      const srcFilePathRaw = args[0]
       const srcLangRaw = getFlagAsString({
         flags,
         keys: ['src-lang', 'sl'],
@@ -342,26 +335,38 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         keys: ['dist-lang', 'dl'],
         coalesce: undefined,
       })
+      const distFilePathRaw = getFlagAsString({
+        flags,
+        keys: ['dist-file-path', 'df'],
+        coalesce: undefined,
+      })
+      const { srcLang, distLang, srcFilePath, distFilePath } = z
+        .object({
+          srcLang: zLangProcessed,
+          distLang: zLangProcessed,
+          srcFilePath: z.string(),
+          distFilePath: z.string().nullable().default(null),
+        })
+        .parse({
+          srcLang: srcLangRaw,
+          distLang: distLangRaw,
+          srcFilePath: srcFilePathRaw,
+          distFilePath: distFilePathRaw,
+        })
+      const parsed = parseFileName(srcFilePath)
       if (parsed.ext !== 'mp3') {
         log.red('File is not mp3')
         break
       }
-      const { srcLang, distLang } = z
-        .object({
-          srcLang: zLangProcessed,
-          distLang: zLangProcessed,
-        })
-        .parse({
-          srcLang: srcLangRaw || parsed.langSingle,
-          distLang: distLangRaw,
-        })
-      await elevenlabs.createDubbing({
-        distLang,
+      const distFilePathSafe = distFilePath || path.resolve(path.dirname(srcFilePath), `${parsed.name}.${distLang}.mp3`)
+      const result = await elevenlabs.createWaitDownloadDubbing({
         srcLang,
-        filePath: srcFilePath,
+        distLang,
+        srcFilePath,
+        distFilePath: distFilePathSafe,
         config,
       })
-      // TODO:ASAP
+      log.green(result)
       break
     }
     case 'apply-audios':
@@ -375,16 +380,14 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const langsRaw = langsString?.split(',')
       const { langs } = z.object({ langs: z.array(zLang) }).parse({ langs: langsRaw })
 
-      applyAudiosToVideo({ inputVideoPath, config, langs })
+      const result = applyAudiosToVideo({ inputVideoPath, config, langs })
+      log.green(result)
       break
     }
-    case 'x': {
-      const dirId = args[1] || config.googleDriveDirId
-      if (!dirId) {
-        log.red('dirId not provided')
-        break
-      }
-      await googleDrive.getAllFilesInDir({ config, dirId })
+    case 'clear': {
+      const dirPath = args[0] || config.contentDir
+      const result = removeVideosAndAudios({ dirPath })
+      log.green(result)
       break
     }
     case 'h': {
@@ -400,8 +403,9 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         elcdb | elevenlabs-create-dubbing-with-browser --src-lang <srcLang> --dist-lang <distLang> <filePath>
         elgd | elevenlabs-get-dubbing <dubbingId>
         eldd | elevenlabs-download-dubbing --dubbing <dubbingId> --file <filePath> --lang <lang>
-        da | dub-audio --src-lang <srcLang> --dist-lang <distLang> <filePath>
+        da | dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
         aa | apply-audios --langs <langs> <inputVideoPath>
+        clear <dirPath>
         h — help
         `)
       break

@@ -6,6 +6,7 @@ import fsync from 'fs'
 import fs from 'fs/promises'
 import { google } from 'googleapis'
 import path from 'path'
+import { log } from 'svag-cli-utils'
 
 // https://developers.google.com/drive/api/quickstart/nodejs?hl=ru
 
@@ -101,7 +102,18 @@ const searchFiles = async ({
   return matchedFiles
 }
 
-const downloadFile = async ({ config, fileId, filePath }: { config: Config; fileId: string; filePath: string }) => {
+const downloadFile = async ({
+  config,
+  fileId,
+  filePath,
+  verbose,
+}: {
+  config: Config
+  fileId: string
+  filePath: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Downloading google drive file', fileId, filePath)
   const { drive } = await getDrive({ config })
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
@@ -131,10 +143,22 @@ const downloadFile = async ({ config, fileId, filePath }: { config: Config; file
     meta.googleDrive.files.push({ id: fileId, name: fileBasename })
     updateMeta({ meta, metaFilePath })
   }
+  verbose && log.normal('Downloaded google drive file', fileId, filePath)
   return { filePath: filePathAbs }
 }
 
-const uploadFile = async ({ config, filePath, dirId }: { config: Config; filePath: string; dirId: string }) => {
+const uploadFile = async ({
+  config,
+  filePath,
+  dirId,
+  verbose,
+}: {
+  config: Config
+  filePath: string
+  dirId: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Uploading file to google drive', filePath, dirId)
   const { drive } = await getDrive({ config })
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath: filePathAbs, config })
@@ -158,6 +182,7 @@ const uploadFile = async ({ config, filePath, dirId }: { config: Config; filePat
   }
   meta.googleDrive.files.push({ id, name: fileBasename })
   updateMeta({ meta, metaFilePath })
+  verbose && log.normal('Uploaded file to google drive', filePath, dirId)
   return {
     filePath: filePathAbs,
     googleDriveData: res.data,

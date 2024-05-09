@@ -30,6 +30,7 @@ export const zMeta = z.object({
         .array(
           z.object({
             id: z.string(),
+            filePath: z.string(),
           })
         )
         .default([]),
