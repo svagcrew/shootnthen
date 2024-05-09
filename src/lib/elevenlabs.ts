@@ -249,7 +249,9 @@ const waitUntilDubbed = async ({
   }
   verbose && log.normal('Waiting for dubbing', dubbingId)
   await wait(10)
-  return waitUntilDubbed({ dubbingId, verbose })
+  const awaitedResult = await waitUntilDubbed({ dubbingId })
+  verbose && log.normal('Dubbed', result)
+  return awaitedResult
 }
 
 const downloadDubbing = async ({
