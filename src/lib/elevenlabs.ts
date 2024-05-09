@@ -13,6 +13,11 @@ import { isFileExists, log } from 'svag-cli-utils'
 import util from 'util'
 const streamPipeline = util.promisify(pipeline)
 
+// character price 0,000165
+// 15 minutes = 50000 characters
+// 1 hour = 200000 characters
+// 28 hours = 5600000 characters = 5600000*0,000165 = 924
+
 const createDubbing = async ({
   config,
   filePath,

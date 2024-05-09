@@ -6,5 +6,3 @@ export { applyAudiosToVideo, extractAudio } from '@/lib/editor'
 export { elevenlabs } from '@/lib/elevenlabs'
 export { kinescope } from '@/lib/kinescope'
 export { removeVideosAndAudios } from '@/lib/fs'
-
-export const x = 1

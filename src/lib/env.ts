@@ -23,6 +23,8 @@ const zEnv = z.object({
   ELEVENLABS_API_KEY: z.string(),
   ELEVENLABS_EMAIL: z.string(),
   ELEVENLABS_PASSWORD: z.string(),
+  RASK_EMAIL: z.string(),
+  RASK_PASSWORD: z.string(),
   KINESCOPE_API_KEY: z.string(),
 })
 

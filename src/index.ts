@@ -5,7 +5,7 @@ import { validateEnv } from '@/lib/env'
 import { googleDrive } from '@/lib/googledrive'
 import dedent from 'dedent'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
-import { applyAudiosToVideo, extractAudio } from '@/lib/editor'
+import { applyAudiosToVideo, converWavToMp3, extractAudio } from '@/lib/editor'
 import { zLang, zLangProcessed } from '@/lib/utils'
 import { parseFileName } from '@/lib/meta'
 import { elevenlabs } from '@/lib/elevenlabs'
@@ -13,8 +13,9 @@ import z from 'zod'
 import { kinescope } from '@/lib/kinescope'
 import { removeVideosAndAudios } from '@/lib/fs'
 import path from 'path'
+import { rask } from '@/lib/rask'
 
-// TODO: translate first 2 videos
+// TODO: dub by rask
 
 // TODO: translate again and again
 
@@ -27,6 +28,11 @@ import path from 'path'
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   validateEnv()
+  const verbose = getFlagAsBoolean({
+    flags,
+    keys: ['verbose'],
+    coalesce: false,
+  })
   const { config } = await getConfig({
     dirPath: cwd,
   })
@@ -99,6 +105,13 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       )
       break
     }
+    case 'get-google-drive-public-url':
+    case 'ggpu': {
+      const fileId = args[0]
+      const { googleDrivePublicUrl } = await googleDrive.getPublicUrl({ fileId, config })
+      log.green(googleDrivePublicUrl)
+      break
+    }
     case 'search-google-drive':
     case 'sg': {
       const dirId = getFlagAsString({
@@ -163,6 +176,14 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const { lang } = z.object({ lang: zLang }).parse({ lang: langRaw })
       const { audioFilePath } = await extractAudio({ config, filePath: args[0], lang })
       log.green(audioFilePath)
+      break
+    }
+    case 'convert-wav-to-mp3':
+    case 'cwm': {
+      const inputWavPath = args[0]
+      const outputMp3Path = args[1]
+      const result = await converWavToMp3({ inputWavPath, outputMp3Path })
+      log.green(result)
       break
     }
     case 'elevenlabs-create-dubbing':
@@ -322,8 +343,8 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       log.green(result)
       break
     }
-    case 'dub-audio':
-    case 'da': {
+    case 'elevenlabs-dub-audio':
+    case 'eda': {
       const srcFilePathRaw = args[0]
       const srcLangRaw = getFlagAsString({
         flags,
@@ -369,6 +390,129 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       log.green(result)
       break
     }
+    case 'rask-create-project':
+    case 'rcp': {
+      const filePathRaw = args[0]
+      const srcLangRaw = getFlagAsString({
+        flags,
+        keys: ['src-lang', 'sl'],
+        coalesce: undefined,
+      })
+      const distLangRaw = getFlagAsString({
+        flags,
+        keys: ['dist-lang', 'dl'],
+        coalesce: undefined,
+      })
+      const { srcLang, distLang, filePath } = z
+        .object({
+          srcLang: zLangProcessed,
+          distLang: zLangProcessed,
+          filePath: z.string(),
+        })
+        .parse({
+          srcLang: srcLangRaw,
+          distLang: distLangRaw,
+          filePath: filePathRaw,
+        })
+      const parsed = parseFileName(filePath)
+      if (parsed.ext !== 'mp3') {
+        log.red('File is not mp3')
+        break
+      }
+      const result = await rask.createProjectWithBrowserByFilePath({
+        distLang,
+        srcLang,
+        filePath,
+        config,
+        verbose,
+      })
+      log.green(result)
+      break
+    }
+    case 'rask-get-project-status':
+    case 'rgps': {
+      const projectId = args[0]
+      const result = await rask.getProjectStatusWithBrowser({ projectId })
+      log.green(result)
+      break
+    }
+    case 'rask-start-dubbing':
+    case 'rsd': {
+      const projectId = args[0]
+      const result = await rask.startDubbingWithBrowser({ projectId })
+      log.green(result)
+      break
+    }
+    case 'rask-download-dubbing':
+    case 'rdd': {
+      const filePathRaw = getFlagAsString({
+        flags,
+        keys: ['file', 'f'],
+        coalesce: undefined,
+      })
+      const projectIdRaw = getFlagAsString({
+        flags,
+        keys: ['project', 'p'],
+        coalesce: undefined,
+      })
+      const { projectId, filePath } = z.object({ projectId: z.string(), filePath: z.string() }).parse({
+        projectId: projectIdRaw,
+        filePath: filePathRaw,
+      })
+      const result = await rask.downloadDubbingWithBrowser({ projectId, config, filePath, verbose })
+      log.green(result)
+      break
+    }
+    case 'rask-dub-audio':
+    case 'rda': {
+      const srcFilePathRaw = args[0]
+      const srcLangRaw = getFlagAsString({
+        flags,
+        keys: ['src-lang', 'sl'],
+        coalesce: undefined,
+      })
+      const distLangRaw = getFlagAsString({
+        flags,
+        keys: ['dist-lang', 'dl'],
+        coalesce: undefined,
+      })
+      const distFilePathRaw = getFlagAsString({
+        flags,
+        keys: ['dist-file-path', 'df'],
+        coalesce: undefined,
+      })
+      const { srcLang, distLang, srcFilePath, distFilePath } = z
+        .object({
+          srcLang: zLangProcessed,
+          distLang: zLangProcessed,
+          srcFilePath: z.string(),
+          distFilePath: z.string().nullable().default(null),
+        })
+        .parse({
+          srcLang: srcLangRaw,
+          distLang: distLangRaw,
+          srcFilePath: srcFilePathRaw,
+          distFilePath: distFilePathRaw,
+        })
+      const parsed = parseFileName(srcFilePath)
+      if (parsed.ext !== 'mp3') {
+        log.red('File is not mp3')
+        break
+      }
+      const distFilePathSafe = distFilePath || path.resolve(path.dirname(srcFilePath), `${parsed.name}.${distLang}.wav`)
+      const result = await rask.createWaitDownloadConvertDubbing({
+        srcLang,
+        distLang,
+        srcFilePath,
+        distFilePath: distFilePathSafe,
+        config,
+        verbose,
+      })
+      log.green({
+        filePath: result.filePath,
+      })
+      break
+    }
     case 'apply-audios':
     case 'aa': {
       const inputVideoPath = args[0]
@@ -398,12 +542,18 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         uk | upload-to-kinescope --parent <parentId> --video <videoId> <filePath>
         lkp | list-kinescope-projects
         ea | extract-audio --lang <lang> <filePath>
+        cwm | convert-wav-to-mp3 <inputWavPath> <outputMp3Path>
         elcd | elevenlabs-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
         elcdu | elevenlabs-create-dubbing-by-url --src-lang <srcLang> --dist-lang <distLang> --file <filePath> <url>
         elcdb | elevenlabs-create-dubbing-with-browser --src-lang <srcLang> --dist-lang <distLang> <filePath>
         elgd | elevenlabs-get-dubbing <dubbingId>
         eldd | elevenlabs-download-dubbing --dubbing <dubbingId> --file <filePath> --lang <lang>
-        da | dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
+        eda | elevenlabs-dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
+        rcd | rask-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
+        rgds | rask-get-dubbing-status <dubbingId>
+        rsd | rask-start-dubbing <dubbingId>
+        rdd | rask-download-dubbing --project <projectId> --file <filePath>
+        rda | rask-dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
         aa | apply-audios --langs <langs> <inputVideoPath>
         clear <dirPath>
         h — help

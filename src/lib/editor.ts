@@ -103,3 +103,18 @@ export const applyAudiosToVideo = async ({
   verbose && log.normal('Applied audios to video', { outputVideoPath })
   return { outputVideoPath }
 }
+
+export const converWavToMp3 = async ({
+  inputWavPath,
+  outputMp3Path,
+}: {
+  inputWavPath: string
+  outputMp3Path: string
+}) => {
+  const nativeCommand = `ffmpeg -i "${inputWavPath}" -codec:a libmp3lame -qscale:a 2 -y "${outputMp3Path}"`
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+  return {
+    inputWavPath,
+    outputMp3Path,
+  }
+}

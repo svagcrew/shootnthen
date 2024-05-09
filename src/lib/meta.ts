@@ -24,6 +24,22 @@ export const zMeta = z.object({
         .default([]),
     })
     .default({ dubbings: [] }),
+  rask: z
+    .object({
+      dubbings: z
+        .array(
+          z.object({
+            srcUrl: z.string().nullable().default(null),
+            srcFilePath: z.string().nullable().default(null),
+            distFilePath: z.string().nullable().default(null),
+            id: z.string(),
+            srcLang: z.string(),
+            distLang: z.string(),
+          })
+        )
+        .default([]),
+    })
+    .default({ dubbings: [] }),
   kinescope: z
     .object({
       videos: z

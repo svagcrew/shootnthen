@@ -189,9 +189,23 @@ const uploadFile = async ({
   }
 }
 
+const getPublicUrl = async ({ config, fileId }: { config: Config; fileId: string }) => {
+  const { drive } = await getDrive({ config })
+  await drive.permissions.create({
+    fileId,
+    requestBody: {
+      role: 'reader',
+      type: 'anyone',
+    },
+  })
+  const googleDrivePublicUrl = `https://drive.google.com/file/d/${fileId}/view`
+  return { googleDrivePublicUrl }
+}
+
 export const googleDrive = {
   searchFiles,
   downloadFile,
   uploadFile,
   getAllFilesInDir,
+  getPublicUrl,
 }
