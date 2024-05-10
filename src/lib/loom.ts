@@ -10,12 +10,18 @@ import { log } from 'svag-cli-utils'
 import util from 'util'
 const streamPipeline = util.promisify(pipeline)
 
+const fileBaseNameByTitleAndLang = ({ title, lang }: { title: string; lang?: Lang }) => {
+  const langSuffix = lang ? `.${lang}` : ''
+  return replaceIllegalSymbolsFromFileName(title).replaceAll('.', '_') + langSuffix + '.mp4'
+}
+
 const downloadVideoByPublicUrl = async ({
   loomPublicUrl,
   filePath,
   title,
   config,
   lang,
+  force,
   verbose,
 }: {
   loomPublicUrl: string
@@ -23,6 +29,7 @@ const downloadVideoByPublicUrl = async ({
   title?: string
   config: Config
   lang?: Lang
+  force?: boolean
   verbose?: boolean
 }) => {
   verbose && log.normal(`Downloading loom video from ${loomPublicUrl}`)
@@ -32,11 +39,7 @@ const downloadVideoByPublicUrl = async ({
     if (filePath) {
       return path.resolve(config.contentDir, filePath)
     } else {
-      const langSuffix = lang ? `.${lang}` : ''
-      return path.resolve(
-        config.contentDir,
-        replaceIllegalSymbolsFromFileName(title).replaceAll('.', '_') + langSuffix + '.mp4'
-      )
+      return path.resolve(config.contentDir, fileBaseNameByTitleAndLang({ title: loomTitle, lang }))
     }
   })()
   const { meta, metaFilePath } = getMetaByFilePath({ filePath: filePathAbs, config })
@@ -44,6 +47,10 @@ const downloadVideoByPublicUrl = async ({
   const loomId = loomPublicUrlParsed.pathname.split('/').pop()
   if (!loomId) {
     throw new Error(`No loom id found in ${loomPublicUrl}`)
+  }
+  const exRecordBefore = meta.loom.videos.find((v) => v.id === loomId)
+  if (exRecordBefore && !force) {
+    return { filePath: exRecordBefore.filePath, title: exRecordBefore.title }
   }
   const res = await (async () => {
     try {

@@ -30,16 +30,24 @@ const createProject = async ({
   config,
   presetId,
   filePath,
+  force,
   verbose,
 }: {
   config: Config
   presetId?: string
   filePath: string
+  force?: boolean
   verbose?: boolean
 }) => {
-  verbose && log.normal('Creating project', filePath)
+  verbose && log.normal('Creating project', { filePath })
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
+  const exRecord = meta.auphonic.projects.find((p) => p.srcFilePath === filePathAbs && p.presetId === presetId)
+  if (exRecord && !force) {
+    verbose && log.normal('Project already created', { projectId: exRecord.id })
+    return { projectId: exRecord.id }
+  }
+
   const parsedName = parseFileName(filePath)
   const email = getEnv('AUPHONIC_EMAIL')
   const password = getEnv('AUPHONIC_PASSWORD')
@@ -112,9 +120,10 @@ const createProject = async ({
     id: projectId,
     srcFilePath: filePathAbs,
     distFilePath: null,
+    presetId,
   })
   updateMeta({ meta, metaFilePath })
-  verbose && log.normal('Created project', projectId)
+  verbose && log.normal('Created project', { projectId })
   return { projectId }
 }
 
@@ -205,16 +214,23 @@ const downloadProject = async ({
   config,
   projectId,
   filePath,
+  force,
   verbose,
 }: {
   config: Config
   projectId: string
   filePath: string
+  force?: boolean
   verbose?: boolean
 }) => {
   verbose && log.normal('Downloading project', projectId, filePath)
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
+  const exRecordBefore = meta.auphonic.projects.find((p) => p.id === projectId && p.distFilePath === filePathAbs)
+  if (exRecordBefore && !force) {
+    verbose && log.normal('Project already downloaded', projectId, filePathAbs)
+    return { filePath: filePathAbs }
+  }
   const { status, outputs } = await getProject({ projectId, verbose })
   if (status !== 'done') {
     throw new Error('Project is not done')
@@ -266,16 +282,18 @@ const createWaitDownload = async ({
   config,
   srcFilePath,
   distFilePath,
+  force,
   verbose,
 }: {
   config: Config
   srcFilePath: string
   distFilePath: string
+  force?: boolean
   verbose?: boolean
 }) => {
-  const { projectId } = await createProject({ config, filePath: srcFilePath })
+  const { projectId } = await createProject({ config, filePath: srcFilePath, force })
   await waitWhileProcessing({ projectId, verbose })
-  const result = await downloadProject({ config, projectId, filePath: distFilePath, verbose })
+  const result = await downloadProject({ config, projectId, filePath: distFilePath, verbose, force })
   return result
 }
 

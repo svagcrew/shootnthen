@@ -1,4 +1,3 @@
-/* eslint-disable no-useless-catch */
 import { googleDrive } from '@/exports'
 import { closeBrowser, visitPage } from '@/lib/browser'
 import { Config } from '@/lib/config'
@@ -9,80 +8,92 @@ import { LangProcessed, wait } from '@/lib/utils'
 import axios, { isAxiosError } from 'axios'
 import fs from 'fs'
 import path from 'path'
-import { ElementHandle } from 'puppeteer'
+import { ElementHandle, Page } from 'puppeteer'
 import { pipeline } from 'stream'
 import { isFileExists, log } from 'svag-cli-utils'
 import util from 'util'
 const streamPipeline = util.promisify(pipeline)
 
-const authorize = async ({ verbose }: { verbose?: boolean } = {}) => {
-  const email = getEnv('RASK_EMAIL')
-  const password = getEnv('RASK_PASSWORD')
-  const page = await visitPage('https://app.rask.ai/')
+const maxRetryNumber = 3
 
-  verbose && log.normal('Checking if already authorized')
-
-  const authorizedHeaderSelector = 'text/Translate video and audio'
-  const signInButtonSelector = 'text/Sign in'
-  const { signInButton, authorizedHeader } = await new Promise<{
-    signInButton: ElementHandle | null
-    authorizedHeader: ElementHandle | null
-  }>((resolve) => {
-    const timeout = setTimeout(() => {
-      clearInterval(interval)
-      resolve({
-        signInButton: null,
-        authorizedHeader: null,
-      })
-    }, 20000)
-    const interval = setInterval(() => {
-      void (async () => {
-        const signInButton = await page.$(signInButtonSelector)
-        const authorizedHeader = await page.$(authorizedHeaderSelector)
-        if (signInButton || authorizedHeader) {
-          clearTimeout(timeout)
-          clearInterval(interval)
-          resolve({
-            signInButton,
-            authorizedHeader,
-          })
-        }
-      })()
-    }, 1000)
-  })
-  if (!signInButton && !authorizedHeader) {
-    throw new Error('No account button and no sign in button')
-  }
-  if (authorizedHeader) {
-    verbose && log.normal('Already authorized')
-    return { page }
-  }
-  if (!signInButton) {
-    throw new Error('No sign in button')
-  }
-  verbose && log.normal('Start signing in')
-  await signInButton.click()
-  await wait(3)
-
-  const emailInputSelector = '[name="email"]'
-  const passwordInputSelector = '[type="password"]'
-  await page.waitForSelector(emailInputSelector)
-  await page.waitForSelector(passwordInputSelector)
-
-  await page.type(emailInputSelector, email)
-  await page.type(passwordInputSelector, password)
-  await page.keyboard.press('Enter')
-
-  await wait(5)
-
-  await page.goto('https://app.rask.ai/')
-
+const authorize = async ({ verbose, retryNumber = 0 }: { verbose?: boolean; retryNumber?: number } = {}): Promise<{
+  page: Page
+}> => {
   try {
-    await page.waitForSelector(authorizedHeaderSelector)
-    verbose && log.normal('Signed in')
-    return { page }
+    const email = getEnv('RASK_EMAIL')
+    const password = getEnv('RASK_PASSWORD')
+    const page = await visitPage('https://app.rask.ai/')
+
+    verbose && log.normal('Checking if already authorized', { retryNumber })
+
+    const authorizedHeaderSelector = 'text/Translate video and audio'
+    const signInButtonSelector = 'text/Sign in'
+    const { signInButton, authorizedHeader } = await new Promise<{
+      signInButton: ElementHandle | null
+      authorizedHeader: ElementHandle | null
+    }>((resolve) => {
+      const timeout = setTimeout(() => {
+        clearInterval(interval)
+        resolve({
+          signInButton: null,
+          authorizedHeader: null,
+        })
+      }, 20000)
+      const interval = setInterval(() => {
+        void (async () => {
+          const signInButton = await page.$(signInButtonSelector)
+          const authorizedHeader = await page.$(authorizedHeaderSelector)
+          if (signInButton || authorizedHeader) {
+            clearTimeout(timeout)
+            clearInterval(interval)
+            resolve({
+              signInButton,
+              authorizedHeader,
+            })
+          }
+        })()
+      }, 1000)
+    })
+    if (!signInButton && !authorizedHeader) {
+      throw new Error('No account button and no sign in button')
+    }
+    if (authorizedHeader) {
+      verbose && log.normal('Already authorized')
+      return { page }
+    }
+    if (!signInButton) {
+      throw new Error('No sign in button')
+    }
+    verbose && log.normal('Start signing in')
+    await signInButton.click()
+    await wait(3)
+
+    const emailInputSelector = '[name="email"]'
+    const passwordInputSelector = '[type="password"]'
+    await page.waitForSelector(emailInputSelector)
+    await page.waitForSelector(passwordInputSelector)
+
+    await page.type(emailInputSelector, email)
+    await page.type(passwordInputSelector, password)
+    await page.keyboard.press('Enter')
+
+    await wait(5)
+
+    await page.goto('https://app.rask.ai/')
+
+    try {
+      await page.waitForSelector(authorizedHeaderSelector)
+      verbose && log.normal('Signed in')
+      return { page }
+    } catch (err) {
+      throw new Error('No authorized header after sign in')
+    }
   } catch (err) {
-    throw new Error('No authorized header after sign in')
+    await closeBrowser()
+    if (retryNumber < maxRetryNumber) {
+      return await authorize({ verbose, retryNumber: retryNumber + 1 })
+    }
+    throw err
   }
 }
 
@@ -100,6 +111,8 @@ const createProjectWithBrowserByFilePath = async ({
   distLang,
   verbose,
   googleDriveDirId,
+  force,
+  retryNumber = 0,
 }: {
   config: Config
   filePath: string
@@ -107,57 +120,81 @@ const createProjectWithBrowserByFilePath = async ({
   distLang: LangProcessed
   verbose?: boolean
   googleDriveDirId?: string
-}) => {
-  const filePathAbs = path.resolve(config.contentDir, filePath)
-  const { meta } = getMetaByFilePath({ filePath, config })
-  const parsedName = parseFileName(filePath)
-  const googleDriveFileMeta = meta.googleDrive.files.find((file) => file.name === parsedName.basename)
-  if (!parsedName.ext || !['mp4', 'mp3'].includes(parsedName.ext)) {
-    throw new Error('Only mp4 and mp3 files are allowed')
-  }
-  if (googleDriveFileMeta) {
-    const { googleDrivePublicUrl } = await googleDrive.getPublicUrl({
-      config,
-      fileId: googleDriveFileMeta.id,
-    })
-    return await createProjectWithBrowserByUrlAndFilePath({
-      config,
-      googleDrivePublicUrl,
-      filePath,
-      srcLang,
-      distLang,
-      verbose,
-    })
-  } else {
-    const { fileExists } = await isFileExists({ filePath: filePathAbs })
-    if (!fileExists) {
-      throw new Error('File not found')
+  force?: boolean
+  retryNumber?: number
+}): Promise<{
+  projectId: string
+  srcLang: LangProcessed
+  distLang: LangProcessed
+}> => {
+  try {
+    const filePathAbs = path.resolve(config.contentDir, filePath)
+    const { meta } = getMetaByFilePath({ filePath, config })
+    const parsedName = parseFileName(filePath)
+    const googleDriveFileMeta = meta.googleDrive.files.find((file) => file.name === parsedName.basename)
+    if (!parsedName.ext || !['mp4', 'mp3'].includes(parsedName.ext)) {
+      throw new Error('Only mp4 and mp3 files are allowed')
     }
-    googleDriveDirId = googleDriveDirId || config.googleDriveDirId || undefined
-    if (!googleDriveDirId) {
-      throw new Error('No google drive dir id')
+    if (googleDriveFileMeta) {
+      const { googleDrivePublicUrl } = await googleDrive.getPublicUrl({
+        config,
+        fileId: googleDriveFileMeta.id,
+      })
+      return await createProjectWithBrowserByUrlAndFilePath({
+        config,
+        googleDrivePublicUrl,
+        filePath,
+        srcLang,
+        distLang,
+        verbose,
+        force,
+      })
+    } else {
+      const { fileExists } = await isFileExists({ filePath: filePathAbs })
+      if (!fileExists) {
+        throw new Error('File not found')
+      }
+      googleDriveDirId = googleDriveDirId || config.googleDriveDirId || undefined
+      if (!googleDriveDirId) {
+        throw new Error('No google drive dir id')
+      }
+      const { googleDriveData } = await googleDrive.uploadFile({
+        config,
+        filePath,
+        dirId: googleDriveDirId,
+        verbose,
+      })
+      if (!googleDriveData.id) {
+        throw new Error('No google drive file id after upload')
+      }
+      const { googleDrivePublicUrl } = await googleDrive.getPublicUrl({
+        config,
+        fileId: googleDriveData.id,
+      })
+      return await createProjectWithBrowserByUrlAndFilePath({
+        config,
+        googleDrivePublicUrl,
+        filePath,
+        srcLang,
+        distLang,
+        force,
+        verbose,
+      })
     }
-    const { googleDriveData } = await googleDrive.uploadFile({
-      config,
-      filePath,
-      dirId: googleDriveDirId,
-      verbose,
-    })
-    if (!googleDriveData.id) {
-      throw new Error('No google drive file id after upload')
+  } catch (err) {
+    await closeBrowser()
+    if (retryNumber < maxRetryNumber) {
+      return await createProjectWithBrowserByFilePath({
+        config,
+        filePath,
+        srcLang,
+        distLang,
+        verbose,
+        googleDriveDirId,
+        retryNumber: retryNumber + 1,
+      })
     }
-    const { googleDrivePublicUrl } = await googleDrive.getPublicUrl({
-      config,
-      fileId: googleDriveData.id,
-    })
-    return await createProjectWithBrowserByUrlAndFilePath({
-      config,
-      googleDrivePublicUrl,
-      filePath,
-      srcLang,
-      distLang,
-      verbose,
-    })
+    throw err
   }
 }
 
@@ -168,6 +205,8 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
   srcLang,
   distLang,
   verbose,
+  force,
+  retryNumber = 0,
 }: {
   config: Config
   googleDrivePublicUrl: string
@@ -175,11 +214,22 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
   srcLang: LangProcessed
   distLang: LangProcessed
   verbose?: boolean
-}) => {
+  force?: boolean
+  retryNumber?: number
+}): Promise<{
+  projectId: string
+  srcLang: LangProcessed
+  distLang: LangProcessed
+}> => {
   try {
-    verbose && log.normal('Creating dubbing with browser', googleDrivePublicUrl, srcLang, distLang)
+    verbose && log.normal('Creating project with browser', { googleDrivePublicUrl, srcLang, distLang, retryNumber })
     const filePathAbs = path.resolve(config.contentDir, filePath)
     const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
+    const exRecord = meta.rask.projects.find((p) => p.srcUrl === googleDrivePublicUrl || p.srcFilePath === filePathAbs)
+    if (exRecord && !force) {
+      verbose && log.normal('Project already created', exRecord.id)
+      return { projectId: exRecord.id, srcLang, distLang }
+    }
     const parsedName = parseFileName(filePath)
     const projectName = `${parsedName.name}.${distLang}.${parsedName.ext}`
     if (!parsedName.ext || !['mp4', 'mp3'].includes(parsedName.ext)) {
@@ -281,7 +331,7 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
     if (!projectId) {
       throw new Error('No projectId after upload')
     }
-    meta.rask.dubbings.push({
+    meta.rask.projects.push({
       id: projectId,
       srcLang,
       distLang,
@@ -294,14 +344,36 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
     verbose && log.normal('Dubbing created')
     return { projectId, srcLang, distLang }
   } catch (err) {
-    // await closeBrowser()
+    await closeBrowser()
+    if (retryNumber < maxRetryNumber) {
+      return await createProjectWithBrowserByUrlAndFilePath({
+        config,
+        googleDrivePublicUrl,
+        filePath,
+        srcLang,
+        distLang,
+        force,
+        verbose,
+        retryNumber: retryNumber + 1,
+      })
+    }
     throw err
   }
 }
 
-const getProjectStatusWithBrowser = async ({ projectId, verbose }: { projectId: string; verbose?: boolean }) => {
+const getProjectStatusWithBrowser = async ({
+  projectId,
+  verbose,
+  retryNumber = 0,
+}: {
+  projectId: string
+  verbose?: boolean
+  retryNumber?: number
+}): Promise<{
+  status: string
+}> => {
   try {
-    verbose && log.normal('Getting dubbing status', projectId)
+    verbose && log.normal('Getting dubbing status', { projectId, retryNumber })
     const { page } = await authorize({ verbose })
     await page.goto(`https://app.rask.ai/project/${projectId}`)
     await wait(10)
@@ -342,37 +414,99 @@ const getProjectStatusWithBrowser = async ({ projectId, verbose }: { projectId: 
     verbose && log.normal('Dubbing status got', projectId, status)
     return { status }
   } catch (err) {
-    // await closeBrowser()
+    await closeBrowser()
+    if (retryNumber < maxRetryNumber) {
+      return await getProjectStatusWithBrowser({ projectId, verbose, retryNumber: retryNumber + 1 })
+    }
     throw err
   }
 }
 
-const startDubbingWithBrowser = async ({ projectId, verbose }: { projectId: string; verbose?: boolean }) => {
+const startDubbingWithBrowser = async ({
+  projectId,
+  verbose,
+  retryNumber = 0,
+}: {
+  projectId: string
+  verbose?: boolean
+  retryNumber?: number
+}): Promise<void> => {
   try {
-    verbose && log.normal('Starting dubbing', projectId)
+    verbose && log.normal('Starting dubbing', { projectId, retryNumber })
+
+    const { status } = await getProjectStatusWithBrowser({ projectId, verbose })
+    if (status === 'dubbed') {
+      verbose && log.normal('Already dubbed', projectId)
+      return
+    }
+
     const { page } = await authorize({ verbose })
     await page.goto(`https://app.rask.ai/project/${projectId}`)
     await wait(10)
 
     const buttons = await page.$$('button[type="button"]')
-    const buttonDub = await (async () => {
+    const buttonsDub = await (async () => {
+      const result: Array<ElementHandle> = []
       for (const button of buttons) {
         const text = await button.evaluate((el) => el.textContent)
         if (text.includes('Dub Video')) {
-          return button
+          result.push(button)
         }
       }
-      return null
+      return result
     })()
-    if (!buttonDub) {
-      throw new Error('No button with text translated')
+    if (!buttonsDub.length) {
+      throw new Error('No button with text Dub Video')
     }
-    await buttonDub.press('Enter')
-    await wait(10)
-    await closeBrowser()
-    verbose && log.normal('Dubbing started', projectId)
+    if (buttonsDub.length > 1) {
+      throw new Error('Multiple buttons with text Dub Video')
+    }
+    await buttonsDub[0].press('Enter')
+    await wait(2)
+
+    const buttons1 = await page.$$('button[type="button"]')
+    const buttonsDub1 = await (async () => {
+      const result: Array<ElementHandle> = []
+      for (const button of buttons1) {
+        const text = await button.evaluate((el) => el.textContent)
+        if (text.includes('Dub Video')) {
+          result.push(button)
+        }
+      }
+      return result
+    })()
+    if (!buttonsDub1.length) {
+      await closeBrowser()
+      verbose && log.normal('Dubbing started', projectId)
+      return
+    }
+    if (buttonsDub1.length === 2) {
+      buttonsDub1[1].press('Enter')
+      await wait(2)
+      const buttons11 = await page.$$('button[type="button"]')
+      const buttonsDub11 = await (async () => {
+        const result: Array<ElementHandle> = []
+        for (const button of buttons11) {
+          const text = await button.evaluate((el) => el.textContent)
+          if (text.includes('Dub Video')) {
+            result.push(button)
+          }
+        }
+        return result
+      })()
+      if (!buttonsDub11.length) {
+        await closeBrowser()
+        verbose && log.normal('Dubbing started', projectId)
+        return
+      }
+      throw new Error('Dubbing not started after second click')
+    }
+    throw new Error('Dubbing not started after first click, and no second button found')
   } catch (err) {
-    // await closeBrowser()
+    await closeBrowser()
+    if (retryNumber < maxRetryNumber) {
+      return await startDubbingWithBrowser({ projectId, verbose, retryNumber: retryNumber + 1 })
+    }
     throw err
   }
 }
@@ -380,38 +514,61 @@ const startDubbingWithBrowser = async ({ projectId, verbose }: { projectId: stri
 const waitWhileProcessingWithBrowser = async ({
   projectId,
   verbose,
+  retryNumber = 0,
 }: {
   projectId: string
   verbose?: boolean
+  retryNumber?: number
 }): Promise<{
   status: string
 }> => {
-  const result = await getProjectStatusWithBrowser({ projectId, verbose })
-  if (result.status !== 'processing') {
+  try {
+    log.normal('Waiting while processing', { projectId, retryNumber })
+    const result = await getProjectStatusWithBrowser({ projectId, verbose })
+    if (result.status !== 'processing') {
+      verbose && log.normal('Processing finished', result)
+      return result
+    }
+    verbose && log.normal('Waiting while processing', result)
+    await wait(30)
+    const awaitedResult = await waitWhileProcessingWithBrowser({ projectId })
     verbose && log.normal('Processing finished', result)
-    return result
+    return awaitedResult
+  } catch (err) {
+    await closeBrowser()
+    if (retryNumber < maxRetryNumber) {
+      return await waitWhileProcessingWithBrowser({ projectId, verbose, retryNumber: retryNumber + 1 })
+    }
+    throw err
   }
-  verbose && log.normal('Waiting while processing', result)
-  await wait(30)
-  const awaitedResult = await waitWhileProcessingWithBrowser({ projectId })
-  verbose && log.normal('Processing finished', result)
-  return awaitedResult
 }
 
 const downloadDubbingWithBrowser = async ({
   config,
   projectId,
   filePath,
+  force,
   verbose,
+  retryNumber = 0,
 }: {
   config: Config
   projectId: string
   filePath: string
+  force?: boolean
   verbose?: boolean
-}) => {
+  retryNumber?: number
+}): Promise<{
+  filePath: string
+}> => {
   try {
-    verbose && log.normal('Searching download link', projectId)
+    verbose && log.normal('Searching download link', { projectId, retryNumber })
     const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
+    const filePathAbs = path.resolve(config.contentDir, filePath)
+    const exRecordBefore = meta.rask.projects.find((p) => p.distFilePath === filePathAbs)
+    if (exRecordBefore && !force) {
+      verbose && log.normal('Already downloaded', projectId)
+      return { filePath: filePathAbs }
+    }
     const { page } = await authorize({ verbose })
     await page.goto(`https://app.rask.ai/project/${projectId}`)
     await wait(10)
@@ -419,7 +576,6 @@ const downloadDubbingWithBrowser = async ({
     if (parsedFileName.ext !== 'wav') {
       throw new Error('Only wav files are allowed')
     }
-    const filePathAbs = path.resolve(config.contentDir, filePath)
 
     const buttons = await page.$$('button[type="button"]')
     const buttonDownload = await (async () => {
@@ -441,7 +597,7 @@ const downloadDubbingWithBrowser = async ({
     await audioButton.click()
     await wait(1)
 
-    const thatAudioButton = getNonNullable(await page.$('text/Audio with voice only'))
+    const thatAudioButton = getNonNullable(await page.$('text/Audio with voice and background'))
     // this button inside a with hred. Find parent "a" and get this href
     const url = await thatAudioButton.evaluate((el) => {
       const a = el.closest('a')
@@ -452,7 +608,7 @@ const downloadDubbingWithBrowser = async ({
     }
     await closeBrowser()
 
-    verbose && log.normal('Downloading dubbing file', projectId)
+    verbose && log.normal('Downloading dubbing file', { projectId })
     await (async () => {
       try {
         const response = await axios({
@@ -470,7 +626,7 @@ const downloadDubbingWithBrowser = async ({
       }
     })()
 
-    const exRecord = meta.rask.dubbings.find((dubbing) => dubbing.id === projectId)
+    const exRecord = meta.rask.projects.find((p) => p.id === projectId)
     if (exRecord) {
       exRecord.distFilePath = filePathAbs
       updateMeta({ meta, metaFilePath })
@@ -478,7 +634,17 @@ const downloadDubbingWithBrowser = async ({
     verbose && log.normal('Downloaded dubbing', projectId)
     return { filePath: filePathAbs }
   } catch (err) {
-    // await closeBrowser()
+    await closeBrowser()
+    if (retryNumber < maxRetryNumber) {
+      return await downloadDubbingWithBrowser({
+        config,
+        projectId,
+        filePath,
+        verbose,
+        force,
+        retryNumber: retryNumber + 1,
+      })
+    }
     throw err
   }
 }
@@ -487,14 +653,16 @@ const downloadDubbingWithBrowserAndConvertToMp3 = async ({
   config,
   projectId,
   filePath,
+  force,
   verbose,
 }: {
   config: Config
   projectId: string
   filePath: string
+  force?: boolean
   verbose?: boolean
 }) => {
-  const { filePath: wavFilePath } = await downloadDubbingWithBrowser({ config, projectId, filePath, verbose })
+  const { filePath: wavFilePath } = await downloadDubbingWithBrowser({ config, projectId, filePath, force, verbose })
   const outputMp3Path = wavFilePath.replace(/\.wav$/, '.mp3')
   await converWavToMp3({ inputWavPath: wavFilePath, outputMp3Path })
   return { filePath: outputMp3Path }

@@ -16,17 +16,24 @@ const uploadFile = async ({
   config,
   title,
   filePath,
+  force,
   verbose,
 }: {
   config: Config
   title?: string
   filePath: string
+  force?: boolean
   verbose?: boolean
 }) => {
-  verbose && log.normal('Uploading file to youtube', filePath)
+  verbose && log.normal('Uploading file to youtube', { filePath })
   const { youtubeClient } = await getYoutubeClient({ config })
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath: filePathAbs, config })
+  const exRecord = meta.youtube.videos.find((v) => v.filePath === filePathAbs)
+  if (exRecord && !force) {
+    verbose && log.normal('File already uploaded', { filePath })
+    return { filePath: filePathAbs }
+  }
   title = title || meta.title
   if (!title) {
     throw new Error('No title')
@@ -53,7 +60,7 @@ const uploadFile = async ({
   const viewUrl = `https://www.youtube.com/watch?v=${id}`
   meta.youtube.videos.push({ id, filePath: filePathAbs, title, viewUrl, editUrl })
   updateMeta({ meta, metaFilePath })
-  verbose && log.normal('Uploaded file to youtube', filePath)
+  verbose && log.normal('Uploaded file to youtube', { filePath })
   return {
     filePath: filePathAbs,
     editUrl,

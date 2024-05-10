@@ -9,7 +9,7 @@ import { removeVideosAndAudios } from '@/lib/fs'
 import { googleDrive } from '@/lib/googledrive'
 import { kinescope } from '@/lib/kinescope'
 import { loom } from '@/lib/loom'
-import { parseFileName } from '@/lib/meta'
+import { getMetaByFilePath, parseFileName } from '@/lib/meta'
 import { rask } from '@/lib/rask'
 import { fromRawLang, LangProcessed, zLang, zLangProcessed } from '@/lib/utils'
 import { youtube } from '@/lib/youtube'
@@ -17,17 +17,13 @@ import dedent from 'dedent'
 import path from 'path'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
 import z from 'zod'
-
-// TODO: translate again and again
-
-// TODO: upload file to youtube
-// TODO: boom script: loom → auphonic+elevenlabs → gdrive → youtube/kinescope
+import readlineSync from 'readline-sync'
 
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   const verbose = getFlagAsBoolean({
     flags,
     keys: ['verbose'],
-    coalesce: false,
+    coalesce: true,
   })
   const { config } = await getConfig({
     dirPath: cwd,
@@ -667,16 +663,44 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     }
 
     case 'boom': {
-      const loomPublicUrlRaw = args[0]
-      const { loomPublicUrl, srcLang, distLangs, googleDriveDirId } = z
+      const steps = [
+        'loom',
+        'extract',
+        'auphonic',
+        'rask-cp',
+        'rask-sd',
+        'rask-dd',
+        'apply',
+        'upload',
+        'youtube',
+      ] as const
+      type Step = (typeof steps)[number]
+      const { pause, loomPublicUrl, filePath, srcLang, distLangs, googleDriveDirId, firstStep } = z
         .object({
-          loomPublicUrl: z.string(),
+          pause: z.boolean().optional().nullable(),
+          loomPublicUrl: z.string().optional().nullable(),
+          filePath: z.string().optional().nullable(),
           srcLang: zLang,
           distLangs: z.array(zLangProcessed),
           googleDriveDirId: z.string(),
+          firstStep: z.enum(steps),
         })
         .parse({
-          loomPublicUrl: loomPublicUrlRaw,
+          pause: getFlagAsBoolean({
+            flags,
+            keys: ['pause', 'p'],
+            coalesce: false,
+          }),
+          loomPublicUrl: getFlagAsString({
+            flags,
+            keys: ['loom', 'l'],
+            coalesce: undefined,
+          }),
+          filePath: getFlagAsString({
+            flags,
+            keys: ['file', 'f'],
+            coalesce: undefined,
+          }),
           srcLang:
             getFlagAsString({
               flags,
@@ -695,9 +719,35 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
               keys: ['dir', 'd'],
               coalesce: config.googleDriveDirId,
             }) || undefined,
+          firstStep:
+            getFlagAsString({
+              flags,
+              keys: ['step', 's'],
+              coalesce: undefined,
+            }) || 'loom',
         })
-      const loomResult = await loom.downloadVideoByPublicUrl({ loomPublicUrl, lang: srcLang, config, verbose })
-      const extractResult = await extractAudio({ config, filePath: loomResult.filePath, lang: srcLang })
+
+      const isStepActual = (step: Step) => steps.indexOf(step) >= steps.indexOf(firstStep)
+      if (!loomPublicUrl && !filePath) {
+        throw new Error('loomPublicUrl or filePath required')
+      }
+      const loomResult = loomPublicUrl
+        ? await loom.downloadVideoByPublicUrl({
+            loomPublicUrl,
+            lang: srcLang,
+            config,
+            verbose,
+          })
+        : null
+      const filePathNormalized = loomResult?.filePath || filePath
+      if (!filePathNormalized) {
+        throw new Error('filePath not provided')
+      }
+      const filePathAbs = path.resolve(config.contentDir, filePathNormalized)
+      if (!filePathAbs.endsWith('.mp4')) {
+        throw new Error('File is not mp4')
+      }
+      const extractResult = await extractAudio({ config, filePath: filePathAbs, lang: srcLang })
       const originalAudioParsedName = parseFileName(extractResult.audioFilePath)
       const originalLangRaw = originalAudioParsedName.langSingle
       if (!originalLangRaw) {
@@ -714,59 +764,105 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       if (auphonicDistFilePath === extractResult.audioFilePath) {
         throw new Error('auphonicDistFilePath === extractResult.audioFilePath')
       }
-      const auphonicResult = await auphonic.createWaitDownload({
-        srcFilePath: extractResult.audioFilePath,
-        config,
-        distFilePath: auphonicDistFilePath,
-        verbose,
-      })
+      const auphonicResult = isStepActual('auphonic')
+        ? await auphonic.createWaitDownload({
+            srcFilePath: extractResult.audioFilePath,
+            config,
+            distFilePath: auphonicDistFilePath,
+            verbose,
+          })
+        : {
+            filePath: auphonicDistFilePath,
+          }
       const raskDistMp3sPaths: string[] = []
+      const { meta } = getMetaByFilePath({ filePath: extractResult.audioFilePath, config })
       for (const distLang of distLangs) {
         if (distLang === originalLangProcessed) {
           continue
         }
-        const raskResult = await rask.createWaitDownloadConvertDubbing({
-          srcLang: originalLangProcessed,
-          distLang,
-          srcFilePath: auphonicResult.filePath,
-          distFilePath: path.resolve(
-            path.dirname(auphonicResult.filePath),
-            `${originalAudioParsedName.name}.${distLang}.wav`
-          ),
-          config,
-          verbose,
-        })
-        const distMp3Path = path.resolve(
-          path.dirname(raskResult.filePath),
-          `${originalAudioParsedName.name}.${distLang}.mp3`
-        )
-        raskDistMp3sPaths.push(distMp3Path)
+        // const raskResult = await rask.createWaitDownloadConvertDubbing({
+        //   srcLang: originalLangProcessed,
+        //   distLang,
+        //   srcFilePath: auphonicResult.filePath,
+        //   distFilePath: path.resolve(
+        //     path.dirname(auphonicResult.filePath),
+        //     `${originalAudioParsedName.name}.${distLang}.wav`
+        //   ),
+        //   config,
+        //   verbose,
+        // })
+
+        const projectId = await (async () => {
+          if (isStepActual('rask-cp')) {
+            const { projectId } = await rask.createProjectWithBrowserByFilePath({
+              config,
+              filePath: auphonicResult.filePath,
+              srcLang: originalLangProcessed,
+              distLang,
+              verbose,
+            })
+            await rask.waitWhileProcessingWithBrowser({ projectId, verbose })
+            return projectId
+          }
+          const projectId = meta.rask.projects.find((p) => p.distLang === distLang)?.id
+          if (!projectId) {
+            throw new Error(`projectId not found for distLang ${distLang}`)
+          }
+          return projectId
+        })()
+
+        if (isStepActual('rask-sd')) {
+          await rask.waitWhileProcessingWithBrowser({ projectId, verbose })
+          if (pause) {
+            readlineSync.question('Check your dubs and press Enter')
+          }
+          await rask.startDubbingWithBrowser({ projectId, verbose })
+          await rask.waitWhileProcessingWithBrowser({ projectId, verbose })
+        }
+        if (isStepActual('rask-dd')) {
+          const raskResult = await rask.downloadDubbingWithBrowserAndConvertToMp3({
+            config,
+            projectId,
+            filePath: path.resolve(
+              path.dirname(auphonicResult.filePath),
+              `${originalAudioParsedName.name}.${distLang}.wav`
+            ),
+            verbose,
+          })
+          const distMp3Path = path.resolve(
+            path.dirname(raskResult.filePath),
+            `${originalAudioParsedName.name}.${distLang}.mp3`
+          )
+          raskDistMp3sPaths.push(distMp3Path)
+        }
       }
       const applyAudiosToVideoResult = await applyAudiosToVideo({
-        inputVideoPath: loomResult.filePath,
+        inputVideoPath: filePathAbs,
         config,
         langs: distLangs,
         verbose,
       })
       const valuableFilesPaths = [
-        loomResult.filePath,
+        filePathAbs,
         extractResult.audioFilePath,
         auphonicResult.filePath,
         ...raskDistMp3sPaths,
       ]
       for (const valuableFilePath of valuableFilesPaths) {
-        await googleDrive.uploadFileIfNotUploaded({
+        await googleDrive.uploadFile({
           config,
           filePath: valuableFilePath,
           dirId: googleDriveDirId,
         })
       }
-      const youtubeResult = await youtube.uploadFile({
-        config,
-        title: loomResult.title,
-        filePath: applyAudiosToVideoResult.outputVideoPath,
-        verbose,
-      })
+      if (isStepActual('youtube')) {
+        const youtubeResult = await youtube.uploadFile({
+          config,
+          title: meta.title || `Untitled ${new Date().toISOString()}`,
+          filePath: applyAudiosToVideoResult.outputVideoPath,
+          verbose,
+        })
+      }
       break
     }
 

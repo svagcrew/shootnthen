@@ -30,10 +30,27 @@ export const extractAudioSimple = async ({
   })
 }
 
-export const extractAudio = async ({ config, filePath, lang }: { config: Config; filePath: string; lang: string }) => {
+export const extractAudio = async ({
+  config,
+  filePath,
+  lang,
+  force,
+  verbose,
+}: {
+  config: Config
+  filePath: string
+  lang: string
+  force?: boolean
+  verbose?: boolean
+}) => {
   const parsed = parseFileName(filePath)
   const audioFileName = `${parsed.name}.${lang}.mp3`
   const audioFilePath = path.resolve(config.contentDir, audioFileName)
+  const { fileExists } = isFileExistsSync({ filePath: audioFilePath })
+  if (fileExists && !force) {
+    verbose && log.normal('Audio file already exists', { audioFilePath })
+    return { audioFilePath }
+  }
   await extractAudioSimple({ inputVideoPath: filePath, outputAudioPath: audioFilePath })
   return { audioFilePath }
 }

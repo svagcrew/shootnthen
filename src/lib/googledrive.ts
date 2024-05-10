@@ -107,18 +107,25 @@ const uploadFile = async ({
   config,
   filePath,
   dirId,
+  force,
   verbose,
 }: {
   config: Config
   filePath: string
   dirId: string
+  force?: boolean
   verbose?: boolean
 }) => {
-  verbose && log.normal('Uploading file to google drive', filePath, dirId)
+  verbose && log.normal('Uploading file to google drive', { filePath, dirId })
   const { drive } = await getDrive({ config })
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath: filePathAbs, config })
   const fileBasename = path.basename(filePathAbs)
+  const exRecord = meta.googleDrive.files.find((file) => file.name === fileBasename)
+  if (exRecord && !force) {
+    verbose && log.normal('File already uploaded to google drive', { filePath, dirId })
+    return { googleDriveData: { id: exRecord.id }, filePath: filePathAbs }
+  }
   const ext = path.extname(fileBasename)
   const mimeType = ext === '.mp4' ? 'video/mp4' : ext === '.mp3' ? 'audio/mp3' : 'application/octet-stream'
   const res = await drive.files.create({
@@ -137,32 +144,11 @@ const uploadFile = async ({
   }
   meta.googleDrive.files.push({ id, name: fileBasename })
   updateMeta({ meta, metaFilePath })
-  verbose && log.normal('Uploaded file to google drive', filePath, dirId)
+  verbose && log.normal('Uploaded file to google drive', { filePath, dirId })
   return {
     filePath: filePathAbs,
     googleDriveData: res.data,
   }
-}
-
-const uploadFileIfNotUploaded = async ({
-  config,
-  filePath,
-  dirId,
-  verbose,
-}: {
-  config: Config
-  filePath: string
-  dirId: string
-  verbose?: boolean
-}) => {
-  const { meta } = getMetaByFilePath({ filePath, config })
-  const filePathAbs = path.resolve(config.contentDir, filePath)
-  const fileBasename = path.basename(filePath)
-  const exRecord = meta.googleDrive.files.find((file) => file.name === fileBasename)
-  if (exRecord) {
-    return { googleDriveData: { id: exRecord.id }, filePath: filePathAbs }
-  }
-  return await uploadFile({ config, filePath, dirId, verbose })
 }
 
 const getPublicUrl = async ({ config, fileId }: { config: Config; fileId: string }) => {
@@ -182,7 +168,6 @@ export const googleDrive = {
   searchFiles,
   downloadFile,
   uploadFile,
-  uploadFileIfNotUploaded,
   getAllFilesInDir,
   getPublicUrl,
 }

@@ -28,6 +28,7 @@ export const zMeta = z.object({
           z.object({
             srcFilePath: z.string().nullable().default(null),
             distFilePath: z.string().nullable().default(null),
+            presetId: z.string(),
             id: z.string(),
           })
         )
@@ -68,7 +69,7 @@ export const zMeta = z.object({
     .default({ dubbings: [] }),
   rask: z
     .object({
-      dubbings: z
+      projects: z
         .array(
           z.object({
             srcUrl: z.string().nullable().default(null),
@@ -81,7 +82,7 @@ export const zMeta = z.object({
         )
         .default([]),
     })
-    .default({ dubbings: [] }),
+    .default({ projects: [] }),
   kinescope: z
     .object({
       videos: z
