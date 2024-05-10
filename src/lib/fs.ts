@@ -8,3 +8,7 @@ export const removeVideosAndAudios = async ({ dirPath }: { dirPath: string }) =>
   }
   return { filesPaths }
 }
+
+export const replaceIllegalSymbolsFromFileName = (fileName: string) => {
+  return fileName.replace(/[/\\?%*:|"<>]/g, '_')
+}

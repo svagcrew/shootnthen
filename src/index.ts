@@ -1,28 +1,26 @@
 import 'source-map-support/register'
 
 import { getConfig } from '@/lib/config'
-import { validateEnv } from '@/lib/env'
-import { googleDrive } from '@/lib/googledrive'
-import dedent from 'dedent'
-import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
 import { applyAudiosToVideo, converWavToMp3, extractAudio } from '@/lib/editor'
-import { zLang, zLangProcessed } from '@/lib/utils'
-import { parseFileName } from '@/lib/meta'
 import { elevenlabs } from '@/lib/elevenlabs'
-import z from 'zod'
-import { kinescope } from '@/lib/kinescope'
+import { validateEnv } from '@/lib/env'
 import { removeVideosAndAudios } from '@/lib/fs'
-import path from 'path'
+import { googleDrive } from '@/lib/googledrive'
+import { kinescope } from '@/lib/kinescope'
+import { parseFileName } from '@/lib/meta'
 import { rask } from '@/lib/rask'
-
-// TODO: dub by rask
+import { zLang, zLangProcessed } from '@/lib/utils'
+import dedent from 'dedent'
+import path from 'path'
+import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
+import z from 'zod'
+import { loom } from '@/lib/loom'
 
 // TODO: translate again and again
 
 // TODO: download video from loom
 // TODO: auphonic audio
 // TODO: upload file to youtube
-// TODO: add verbose flag
 // TODO: boom script: loom → auphonic+elevenlabs → gdrive → youtube/kinescope
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -183,6 +181,21 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const inputWavPath = args[0]
       const outputMp3Path = args[1]
       const result = await converWavToMp3({ inputWavPath, outputMp3Path })
+      log.green(result)
+      break
+    }
+    case 'apply-audios':
+    case 'aa': {
+      const inputVideoPath = args[0]
+      const langsString = getFlagAsString({
+        flags,
+        keys: ['langs', 'l'],
+        coalesce: undefined,
+      })
+      const langsRaw = langsString?.split(',')
+      const { langs } = z.object({ langs: z.array(zLang) }).parse({ langs: langsRaw })
+
+      const result = applyAudiosToVideo({ inputVideoPath, config, langs })
       log.green(result)
       break
     }
@@ -513,19 +526,23 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       })
       break
     }
-    case 'apply-audios':
-    case 'aa': {
-      const inputVideoPath = args[0]
-      const langsString = getFlagAsString({
+    case 'loom-download':
+    case 'ld': {
+      const loomPublicUrlRaw = args[0]
+      const filePathRaw = getFlagAsString({
         flags,
-        keys: ['langs', 'l'],
+        keys: ['file', 'f'],
         coalesce: undefined,
       })
-      const langsRaw = langsString?.split(',')
-      const { langs } = z.object({ langs: z.array(zLang) }).parse({ langs: langsRaw })
-
-      const result = applyAudiosToVideo({ inputVideoPath, config, langs })
-      log.green(result)
+      const langRaw = getFlagAsString({
+        flags,
+        keys: ['lang', 'l'],
+        coalesce: undefined,
+      })
+      const { loomPublicUrl, filePath, lang } = z
+        .object({ loomPublicUrl: z.string(), filePath: z.string().optional(), lang: zLang })
+        .parse({ loomPublicUrl: loomPublicUrlRaw, filePath: filePathRaw, lang: langRaw })
+      await loom.downloadVideoByPublicUrl({ loomPublicUrl, filePath, lang, config })
       break
     }
     case 'clear': {
@@ -539,22 +556,29 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         dg | download-from-google-drive --dir <dirId> <search>
         ug | upload-to-google-drive --dir <dirId> <files>
         sg | search-google-drive --dir <dirId> <search>
+
         uk | upload-to-kinescope --parent <parentId> --video <videoId> <filePath>
         lkp | list-kinescope-projects
+
         ea | extract-audio --lang <lang> <filePath>
         cwm | convert-wav-to-mp3 <inputWavPath> <outputMp3Path>
+        aa | apply-audios --langs <langs> <inputVideoPath>
+
         elcd | elevenlabs-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
         elcdu | elevenlabs-create-dubbing-by-url --src-lang <srcLang> --dist-lang <distLang> --file <filePath> <url>
         elcdb | elevenlabs-create-dubbing-with-browser --src-lang <srcLang> --dist-lang <distLang> <filePath>
         elgd | elevenlabs-get-dubbing <dubbingId>
         eldd | elevenlabs-download-dubbing --dubbing <dubbingId> --file <filePath> --lang <lang>
         eda | elevenlabs-dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
+
         rcd | rask-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
         rgds | rask-get-dubbing-status <dubbingId>
         rsd | rask-start-dubbing <dubbingId>
         rdd | rask-download-dubbing --project <projectId> --file <filePath>
         rda | rask-dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
-        aa | apply-audios --langs <langs> <inputVideoPath>
+
+        ld | loom-download <loomPublicUrl> <filePath>?
+
         clear <dirPath>
         h — help
         `)
