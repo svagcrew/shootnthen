@@ -166,7 +166,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       })
       // const lang = zLang.parse(langRaw)
       const { lang } = z.object({ lang: zLang }).parse({ lang: langRaw })
-      const { audioFilePath } = await extractAudio({ config, filePath: args[0], lang })
+      const { audioFilePath } = await extractAudio({ config, filePath: args[0], lang, verbose })
       log.green(audioFilePath)
       break
     }
@@ -747,7 +747,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       if (!filePathAbs.endsWith('.mp4')) {
         throw new Error('File is not mp4')
       }
-      const extractResult = await extractAudio({ config, filePath: filePathAbs, lang: srcLang })
+      const extractResult = await extractAudio({ config, filePath: filePathAbs, lang: srcLang, verbose })
       const originalAudioParsedName = parseFileName(extractResult.audioFilePath)
       const originalLangRaw = originalAudioParsedName.langSingle
       if (!originalLangRaw) {
@@ -794,14 +794,16 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
         const projectId = await (async () => {
           if (isStepActual('rask-cp')) {
-            const { projectId } = await rask.createProjectWithBrowserByFilePath({
+            const { projectId, processed } = await rask.createProjectWithBrowserByFilePath({
               config,
               filePath: auphonicResult.filePath,
               srcLang: originalLangProcessed,
               distLang,
               verbose,
             })
-            await rask.waitWhileProcessingWithBrowser({ projectId, verbose })
+            if (processed) {
+              await rask.waitWhileProcessingWithBrowser({ projectId, verbose })
+            }
             return projectId
           }
           const projectId = meta.rask.projects.find((p) => p.distLang === distLang)?.id
@@ -816,9 +818,12 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           if (pause) {
             readlineSync.question('Check your dubs and press Enter')
           }
-          await rask.startDubbingWithBrowser({ projectId, verbose })
-          await rask.waitWhileProcessingWithBrowser({ projectId, verbose })
+          const { processed } = await rask.startDubbingWithBrowser({ projectId, verbose })
+          if (processed) {
+            await rask.waitWhileProcessingWithBrowser({ projectId, verbose })
+          }
         }
+
         if (isStepActual('rask-dd')) {
           const raskResult = await rask.downloadDubbingWithBrowserAndConvertToMp3({
             config,

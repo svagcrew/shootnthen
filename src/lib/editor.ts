@@ -43,6 +43,7 @@ export const extractAudio = async ({
   force?: boolean
   verbose?: boolean
 }) => {
+  verbose && log.normal('Extracting audio', { filePath, lang })
   const parsed = parseFileName(filePath)
   const audioFileName = `${parsed.name}.${lang}.mp3`
   const audioFilePath = path.resolve(config.contentDir, audioFileName)
@@ -52,6 +53,7 @@ export const extractAudio = async ({
     return { audioFilePath }
   }
   await extractAudioSimple({ inputVideoPath: filePath, outputAudioPath: audioFilePath })
+  verbose && log.normal('Extracted audio', { audioFilePath })
   return { audioFilePath }
 }
 

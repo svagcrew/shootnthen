@@ -126,6 +126,7 @@ const createProjectWithBrowserByFilePath = async ({
   projectId: string
   srcLang: LangProcessed
   distLang: LangProcessed
+  processed: boolean
 }> => {
   try {
     const filePathAbs = path.resolve(config.contentDir, filePath)
@@ -220,6 +221,7 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
   projectId: string
   srcLang: LangProcessed
   distLang: LangProcessed
+  processed: boolean
 }> => {
   try {
     verbose && log.normal('Creating project with browser', { googleDrivePublicUrl, srcLang, distLang, retryNumber })
@@ -228,7 +230,7 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
     const exRecord = meta.rask.projects.find((p) => p.srcUrl === googleDrivePublicUrl || p.srcFilePath === filePathAbs)
     if (exRecord && !force) {
       verbose && log.normal('Project already created', exRecord.id)
-      return { projectId: exRecord.id, srcLang, distLang }
+      return { projectId: exRecord.id, srcLang, distLang, processed: false }
     }
     const parsedName = parseFileName(filePath)
     const projectName = `${parsedName.name}.${distLang}.${parsedName.ext}`
@@ -342,7 +344,7 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
     updateMeta({ meta, metaFilePath })
     await closeBrowser()
     verbose && log.normal('Dubbing created')
-    return { projectId, srcLang, distLang }
+    return { projectId, srcLang, distLang, processed: true }
   } catch (err) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
@@ -430,14 +432,16 @@ const startDubbingWithBrowser = async ({
   projectId: string
   verbose?: boolean
   retryNumber?: number
-}): Promise<void> => {
+}): Promise<{
+  processed: boolean
+}> => {
   try {
     verbose && log.normal('Starting dubbing', { projectId, retryNumber })
 
     const { status } = await getProjectStatusWithBrowser({ projectId, verbose })
     if (status === 'dubbed') {
       verbose && log.normal('Already dubbed', projectId)
-      return
+      return { processed: false }
     }
 
     const { page } = await authorize({ verbose })
@@ -478,7 +482,7 @@ const startDubbingWithBrowser = async ({
     if (!buttonsDub1.length) {
       await closeBrowser()
       verbose && log.normal('Dubbing started', projectId)
-      return
+      return { processed: true }
     }
     if (buttonsDub1.length === 2) {
       buttonsDub1[1].press('Enter')
@@ -497,7 +501,7 @@ const startDubbingWithBrowser = async ({
       if (!buttonsDub11.length) {
         await closeBrowser()
         verbose && log.normal('Dubbing started', projectId)
-        return
+        return { processed: true }
       }
       throw new Error('Dubbing not started after second click')
     }

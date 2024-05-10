@@ -50,6 +50,7 @@ const downloadVideoByPublicUrl = async ({
   }
   const exRecordBefore = meta.loom.videos.find((v) => v.id === loomId)
   if (exRecordBefore && !force) {
+    verbose && log.normal(`Loom video already downloaded to ${exRecordBefore.filePath}`)
     return { filePath: exRecordBefore.filePath, title: exRecordBefore.title }
   }
   const res = await (async () => {

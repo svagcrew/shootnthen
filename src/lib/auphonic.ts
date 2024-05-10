@@ -42,12 +42,12 @@ const createProject = async ({
   verbose && log.normal('Creating project', { filePath })
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
+  presetId = presetId || config.auphonicPresetId || undefined
   const exRecord = meta.auphonic.projects.find((p) => p.srcFilePath === filePathAbs && p.presetId === presetId)
   if (exRecord && !force) {
     verbose && log.normal('Project already created', { projectId: exRecord.id })
     return { projectId: exRecord.id }
   }
-
   const parsedName = parseFileName(filePath)
   const email = getEnv('AUPHONIC_EMAIL')
   const password = getEnv('AUPHONIC_PASSWORD')
@@ -59,7 +59,7 @@ const createProject = async ({
   if (!fileExists) {
     throw new Error('File not found')
   }
-  presetId = presetId || config.auphonicPresetId || undefined
+
   if (!presetId) {
     throw new Error('No presetId')
   }
