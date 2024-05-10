@@ -25,6 +25,8 @@ const zEnv = z.object({
   ELEVENLABS_PASSWORD: z.string(),
   RASK_EMAIL: z.string(),
   RASK_PASSWORD: z.string(),
+  AUPHONIC_EMAIL: z.string(),
+  AUPHONIC_PASSWORD: z.string(),
   KINESCOPE_API_KEY: z.string(),
 })
 
@@ -34,10 +36,6 @@ export const envRaw = {
   ...process.env,
 }
 
-export const validateEnv = () => {
-  return zEnv.parse(envRaw)
-}
-
 export const getEnv = <T extends keyof Env>(key: T): Env[T] => {
-  return zEnv.shape[key].parse(envRaw[key])
+  return (zEnv as any).pick({ [key]: zEnv.shape[key] }).parse(envRaw)[key]
 }

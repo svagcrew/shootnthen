@@ -10,6 +10,7 @@ export const zConfig = z.object({
   googleTokenJsonPath: z.string().min(1),
   googleDriveDirId: z.string().optional().nullable(),
   kinescopeParentId: z.string().optional().nullable(),
+  auphonicPresetId: z.string().optional().nullable(),
 })
 export type Config = z.infer<typeof zConfig>
 const defaultConfig: Config = {
@@ -18,6 +19,7 @@ const defaultConfig: Config = {
   googleTokenJsonPath: './creds/google/token.json',
   googleDriveDirId: null,
   kinescopeParentId: null,
+  auphonicPresetId: null,
 }
 
 const findAllConfigsPaths = async ({ dirPath }: { dirPath: string }) => {

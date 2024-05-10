@@ -1,6 +1,6 @@
 import { Config } from '@/exports'
 import { replaceIllegalSymbolsFromFileName } from '@/lib/fs'
-import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
+import { getMetaByFilePath, updateMeta } from '@/lib/meta'
 import { Lang } from '@/lib/utils'
 import axios, { isAxiosError } from 'axios'
 import fs from 'fs'

@@ -5,7 +5,7 @@ import { Config } from '@/lib/config'
 import { converWavToMp3 } from '@/lib/editor'
 import { getEnv } from '@/lib/env'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
-import { LangProcessed } from '@/lib/utils'
+import { LangProcessed, wait } from '@/lib/utils'
 import axios, { isAxiosError } from 'axios'
 import fs from 'fs'
 import path from 'path'
@@ -92,8 +92,6 @@ const getNonNullable = <T>(value: T): NonNullable<T> => {
   }
   return value as NonNullable<T>
 }
-
-const wait = async (s: number) => new Promise((resolve) => setTimeout(resolve, s * 1000))
 
 const createProjectWithBrowserByFilePath = async ({
   config,

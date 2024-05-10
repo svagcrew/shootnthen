@@ -1,31 +1,29 @@
 import 'source-map-support/register'
 
+import { auphonic } from '@/lib/auphonic'
 import { getConfig } from '@/lib/config'
 import { applyAudiosToVideo, converWavToMp3, extractAudio } from '@/lib/editor'
 import { elevenlabs } from '@/lib/elevenlabs'
-import { validateEnv } from '@/lib/env'
 import { removeVideosAndAudios } from '@/lib/fs'
 import { googleDrive } from '@/lib/googledrive'
 import { kinescope } from '@/lib/kinescope'
+import { loom } from '@/lib/loom'
 import { parseFileName } from '@/lib/meta'
 import { rask } from '@/lib/rask'
-import { zLang, zLangProcessed } from '@/lib/utils'
+import { fromRawLang, zLang, zLangProcessed } from '@/lib/utils'
 import dedent from 'dedent'
 import path from 'path'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
 import z from 'zod'
-import { loom } from '@/lib/loom'
 
 // TODO: translate again and again
 
-// TODO: download video from loom
 // TODO: auphonic audio
 // TODO: upload file to youtube
 // TODO: boom script: loom → auphonic+elevenlabs → gdrive → youtube/kinescope
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
-  validateEnv()
   const verbose = getFlagAsBoolean({
     flags,
     keys: ['verbose'],
@@ -545,6 +543,107 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       await loom.downloadVideoByPublicUrl({ loomPublicUrl, filePath, lang, config })
       break
     }
+
+    case 'auphonic-create-project':
+    case 'acp': {
+      const filePathRaw = args[0]
+      const presetIdRaw = getFlagAsString({
+        flags,
+        keys: ['preset', 'p'],
+        coalesce: undefined,
+      })
+      const { presetId, filePath } = z
+        .object({
+          presetId: z.string().optional(),
+          filePath: z.string(),
+        })
+        .parse({
+          presetId: presetIdRaw,
+          filePath: filePathRaw,
+        })
+      const parsed = parseFileName(filePath)
+      if (parsed.ext !== 'mp3') {
+        log.red('File is not mp3')
+        break
+      }
+      const result = await auphonic.createProject({
+        filePath,
+        config,
+        presetId,
+        verbose,
+      })
+      log.green(result)
+      break
+    }
+    case 'auphonic-get-project':
+    case 'agp': {
+      const projectId = args[0]
+      const result = await auphonic.getProject({ projectId, verbose })
+      log.green(result)
+      break
+    }
+    case 'auphonic-download-project':
+    case 'adp': {
+      const filePathRaw = getFlagAsString({
+        flags,
+        keys: ['file', 'f'],
+        coalesce: undefined,
+      })
+      const projectIdRaw = getFlagAsString({
+        flags,
+        keys: ['project', 'p'],
+        coalesce: undefined,
+      })
+      const { projectId, filePath } = z.object({ projectId: z.string(), filePath: z.string() }).parse({
+        projectId: projectIdRaw,
+        filePath: filePathRaw,
+      })
+      const result = await auphonic.downloadProject({ projectId, config, filePath, verbose })
+      log.green(result)
+      break
+    }
+    case 'auphonic-process-audio':
+    case 'apa': {
+      const srcFilePathRaw = args[0]
+      const distFilePathRaw = getFlagAsString({
+        flags,
+        keys: ['dist-file-path', 'df'],
+        coalesce: undefined,
+      })
+      const { srcFilePath, distFilePath } = z
+        .object({
+          srcFilePath: z.string(),
+          distFilePath: z.string().nullable().default(null),
+        })
+        .parse({
+          srcFilePath: srcFilePathRaw,
+          distFilePath: distFilePathRaw,
+        })
+      const parsed = parseFileName(srcFilePath)
+      if (parsed.ext !== 'mp3') {
+        log.red('File is not mp3')
+        break
+      }
+      const distFilePathSafe = (() => {
+        if (distFilePath) {
+          return distFilePath
+        }
+        if (!parsed.langSingle) {
+          throw new Error('distFilePath is not provided and lang is not detected')
+        }
+        const langProcessed = fromRawLang(parsed.langSingle)
+        return path.resolve(path.dirname(srcFilePath), `${parsed.name}.${langProcessed}.mp3`)
+      })()
+      const result = await auphonic.createWaitDownload({
+        srcFilePath,
+        distFilePath: distFilePathSafe,
+        config,
+        verbose,
+      })
+      log.green(result)
+      break
+    }
+
     case 'clear': {
       const dirPath = args[0] || config.contentDir
       const result = removeVideosAndAudios({ dirPath })
@@ -578,6 +677,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         rda | rask-dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
 
         ld | loom-download <loomPublicUrl> <filePath>?
+
+        acp | auphonic-create-project --preset <presetId> <filePath>
+        agp | auphonic-get-project <projectId>
+        adp | auphonic-download-project --project <projectId> --file <filePath>
+        apa | auphonic-process-audio --dist-file-path <distFilePath> <srcFilePath>
 
         clear <dirPath>
         h — help

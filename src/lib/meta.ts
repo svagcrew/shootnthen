@@ -21,6 +21,19 @@ export const zMeta = z.object({
         .default([]),
     })
     .default({ videos: [] }),
+  auphonic: z
+    .object({
+      projects: z
+        .array(
+          z.object({
+            srcFilePath: z.string().nullable().default(null),
+            distFilePath: z.string().nullable().default(null),
+            id: z.string(),
+          })
+        )
+        .default([]),
+    })
+    .default({ projects: [] }),
   elevenlabs: z
     .object({
       dubbings: z

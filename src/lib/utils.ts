@@ -40,3 +40,5 @@ export const getFilePathAndConfigByGlob = async ({ glob }: { glob: string }) => 
   const config = getConfig({ dirPath: path.dirname(filePath) })
   return { filePath, config }
 }
+
+export const wait = async (s: number) => new Promise((resolve) => setTimeout(resolve, s * 1000))

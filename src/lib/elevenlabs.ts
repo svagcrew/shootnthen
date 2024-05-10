@@ -3,7 +3,7 @@ import { closeBrowser, visitPage } from '@/lib/browser'
 import { Config } from '@/lib/config'
 import { getEnv } from '@/lib/env'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
-import { LangProcessed } from '@/lib/utils'
+import { LangProcessed, wait } from '@/lib/utils'
 import axios, { isAxiosError } from 'axios'
 import FormData from 'form-data'
 import fs from 'fs'
@@ -363,8 +363,6 @@ const getNonNullable = <T>(value: T): NonNullable<T> => {
   return value as NonNullable<T>
 }
 
-const wait = async (s: number) => new Promise((resolve) => setTimeout(resolve, s * 1000))
-
 const createDubbingWithBrowser = async ({
   config,
   filePath,
@@ -493,15 +491,15 @@ const createWaitDownloadDubbing = async ({
   distLang: LangProcessed
   verbose?: boolean
 }) => {
-  const { dubbingId } = await elevenlabs.createDubbingWithBrowser({
+  const { dubbingId } = await createDubbingWithBrowser({
     distLang,
     srcLang,
     filePath: srcFilePath,
     config,
     verbose,
   })
-  await elevenlabs.waitUntilDubbed({ dubbingId, verbose })
-  await elevenlabs.downloadDubbing({
+  await waitUntilDubbed({ dubbingId, verbose })
+  await downloadDubbing({
     dubbingId,
     config,
     filePath: distFilePath,
