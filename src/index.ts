@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import 'source-map-support/register'
 
 import { auphonic } from '@/lib/auphonic'
@@ -10,7 +11,8 @@ import { kinescope } from '@/lib/kinescope'
 import { loom } from '@/lib/loom'
 import { parseFileName } from '@/lib/meta'
 import { rask } from '@/lib/rask'
-import { fromRawLang, zLang, zLangProcessed } from '@/lib/utils'
+import { fromRawLang, LangProcessed, zLang, zLangProcessed } from '@/lib/utils'
+import { youtube } from '@/lib/youtube'
 import dedent from 'dedent'
 import path from 'path'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
@@ -18,11 +20,9 @@ import z from 'zod'
 
 // TODO: translate again and again
 
-// TODO: auphonic audio
 // TODO: upload file to youtube
 // TODO: boom script: loom → auphonic+elevenlabs → gdrive → youtube/kinescope
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   const verbose = getFlagAsBoolean({
     flags,
@@ -540,7 +540,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const { loomPublicUrl, filePath, lang } = z
         .object({ loomPublicUrl: z.string(), filePath: z.string().optional(), lang: zLang })
         .parse({ loomPublicUrl: loomPublicUrlRaw, filePath: filePathRaw, lang: langRaw })
-      await loom.downloadVideoByPublicUrl({ loomPublicUrl, filePath, lang, config })
+      await loom.downloadVideoByPublicUrl({ loomPublicUrl, filePath, lang, config, verbose })
       break
     }
 
@@ -644,6 +644,132 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
 
+    case 'upload-to-youtube':
+    case 'uy': {
+      const filePathRaw = args[0]
+      const titleRaw = getFlagAsString({
+        flags,
+        keys: ['title', 't'],
+        coalesce: undefined,
+      })
+      const { title, filePath } = z
+        .object({
+          title: z.string().optional(),
+          filePath: z.string(),
+        })
+        .parse({
+          title: titleRaw,
+          filePath: filePathRaw,
+        })
+      const result = await youtube.uploadFile({ config, title, filePath, verbose })
+      log.green(result)
+      break
+    }
+
+    case 'boom': {
+      const loomPublicUrlRaw = args[0]
+      const { loomPublicUrl, srcLang, distLangs, googleDriveDirId } = z
+        .object({
+          loomPublicUrl: z.string(),
+          srcLang: zLang,
+          distLangs: z.array(zLangProcessed),
+          googleDriveDirId: z.string(),
+        })
+        .parse({
+          loomPublicUrl: loomPublicUrlRaw,
+          srcLang:
+            getFlagAsString({
+              flags,
+              keys: ['src-lang', 'sl'],
+              coalesce: undefined,
+            }) || config.srcLang,
+          distLangs:
+            getFlagAsString({
+              flags,
+              keys: ['dist-langs', 'dl'],
+              coalesce: undefined,
+            })?.split(',') || config.distLangs,
+          googleDriveDirId:
+            getFlagAsString({
+              flags,
+              keys: ['dir', 'd'],
+              coalesce: config.googleDriveDirId,
+            }) || undefined,
+        })
+      const loomResult = await loom.downloadVideoByPublicUrl({ loomPublicUrl, lang: srcLang, config, verbose })
+      const extractResult = await extractAudio({ config, filePath: loomResult.filePath, lang: srcLang })
+      const originalAudioParsedName = parseFileName(extractResult.audioFilePath)
+      const originalLangRaw = originalAudioParsedName.langSingle
+      if (!originalLangRaw) {
+        throw new Error('Original lang not detected')
+      }
+      if (!distLangs.length) {
+        throw new Error('distLangs not provided')
+      }
+      const originalLangProcessed = fromRawLang(originalLangRaw) as LangProcessed
+      const auphonicDistFilePath = path.resolve(
+        path.dirname(extractResult.audioFilePath),
+        `${originalAudioParsedName.name}.${originalLangProcessed}.mp3`
+      )
+      if (auphonicDistFilePath === extractResult.audioFilePath) {
+        throw new Error('auphonicDistFilePath === extractResult.audioFilePath')
+      }
+      const auphonicResult = await auphonic.createWaitDownload({
+        srcFilePath: extractResult.audioFilePath,
+        config,
+        distFilePath: auphonicDistFilePath,
+        verbose,
+      })
+      const raskDistMp3sPaths: string[] = []
+      for (const distLang of distLangs) {
+        if (distLang === originalLangProcessed) {
+          continue
+        }
+        const raskResult = await rask.createWaitDownloadConvertDubbing({
+          srcLang: originalLangProcessed,
+          distLang,
+          srcFilePath: auphonicResult.filePath,
+          distFilePath: path.resolve(
+            path.dirname(auphonicResult.filePath),
+            `${originalAudioParsedName.name}.${distLang}.wav`
+          ),
+          config,
+          verbose,
+        })
+        const distMp3Path = path.resolve(
+          path.dirname(raskResult.filePath),
+          `${originalAudioParsedName.name}.${distLang}.mp3`
+        )
+        raskDistMp3sPaths.push(distMp3Path)
+      }
+      const applyAudiosToVideoResult = await applyAudiosToVideo({
+        inputVideoPath: loomResult.filePath,
+        config,
+        langs: distLangs,
+        verbose,
+      })
+      const valuableFilesPaths = [
+        loomResult.filePath,
+        extractResult.audioFilePath,
+        auphonicResult.filePath,
+        ...raskDistMp3sPaths,
+      ]
+      for (const valuableFilePath of valuableFilesPaths) {
+        await googleDrive.uploadFileIfNotUploaded({
+          config,
+          filePath: valuableFilePath,
+          dirId: googleDriveDirId,
+        })
+      }
+      const youtubeResult = await youtube.uploadFile({
+        config,
+        title: loomResult.title,
+        filePath: applyAudiosToVideoResult.outputVideoPath,
+        verbose,
+      })
+      break
+    }
+
     case 'clear': {
       const dirPath = args[0] || config.contentDir
       const result = removeVideosAndAudios({ dirPath })
@@ -682,6 +808,10 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         agp | auphonic-get-project <projectId>
         adp | auphonic-download-project --project <projectId> --file <filePath>
         apa | auphonic-process-audio --dist-file-path <distFilePath> <srcFilePath>
+
+        uy | upload-to-youtube --title <title> <filePath>
+
+        boom <loomPublicUrl> --src-lang <srcLang> --dist-langs <distLangs>
 
         clear <dirPath>
         h — help

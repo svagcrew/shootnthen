@@ -1,14 +1,10 @@
-/* eslint-disable no-console */
 import { Config } from '@/lib/config'
+import { getGoogleAuthClient } from '@/lib/google'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
-import { authenticate } from '@google-cloud/local-auth'
 import fsync from 'fs'
-import fs from 'fs/promises'
 import { google } from 'googleapis'
 import path from 'path'
 import { log } from 'svag-cli-utils'
-
-// https://developers.google.com/drive/api/quickstart/nodejs?hl=ru
 
 type GoogleDriveFile = {
   id: string
@@ -16,47 +12,9 @@ type GoogleDriveFile = {
   mimeType: string
 }
 
-const getAuthClient = async ({ config }: { config: Config }) => {
-  const SCOPES = ['https://www.googleapis.com/auth/drive']
-
-  async function loadSavedCredentialsIfExist() {
-    try {
-      const content = await fs.readFile(config.googleTokenJsonPath, 'utf8')
-      const credentials = JSON.parse(content)
-      return google.auth.fromJSON(credentials)
-    } catch (err) {
-      return null
-    }
-  }
-
-  async function saveCredentials(client: any) {
-    const content = await fs.readFile(config.googleCredentialsJsonPath, 'utf8')
-    const keys = JSON.parse(content)
-    const key = keys.installed || keys.web
-    const payload = JSON.stringify({
-      type: 'authorized_user',
-      client_id: key.client_id,
-      client_secret: key.client_secret,
-      refresh_token: client.credentials.refresh_token,
-    })
-    await fs.writeFile(config.googleTokenJsonPath, payload)
-  }
-
-  const clientJson = await loadSavedCredentialsIfExist()
-  if (clientJson) {
-    return { authClient: clientJson }
-  }
-  const clientOauth = await authenticate({
-    scopes: SCOPES,
-    keyfilePath: config.googleCredentialsJsonPath,
-  })
-  await saveCredentials(clientOauth)
-  return { authClient: clientOauth }
-}
-
 const getDrive = async ({ config }: { config: Config }) => {
-  const { authClient } = await getAuthClient({ config })
-  const drive = google.drive({ version: 'v3', auth: authClient as any })
+  const { authClient } = await getGoogleAuthClient({ config })
+  const drive = google.drive({ version: 'v3', auth: authClient })
   return { drive }
 }
 
@@ -127,13 +85,11 @@ const downloadFile = async ({
             resolve(true)
           })
           .on('error', (err) => {
-            console.error(err)
             reject(err)
           })
           .pipe(dest)
       })
       .catch((err) => {
-        console.error(err)
         reject(err)
       })
   })
@@ -176,7 +132,6 @@ const uploadFile = async ({
     },
   })
   const id = res.data.id
-  console.dir(res.data, { depth: null })
   if (!id) {
     throw new Error('No id after upload')
   }
@@ -187,6 +142,27 @@ const uploadFile = async ({
     filePath: filePathAbs,
     googleDriveData: res.data,
   }
+}
+
+const uploadFileIfNotUploaded = async ({
+  config,
+  filePath,
+  dirId,
+  verbose,
+}: {
+  config: Config
+  filePath: string
+  dirId: string
+  verbose?: boolean
+}) => {
+  const { meta } = getMetaByFilePath({ filePath, config })
+  const filePathAbs = path.resolve(config.contentDir, filePath)
+  const fileBasename = path.basename(filePath)
+  const exRecord = meta.googleDrive.files.find((file) => file.name === fileBasename)
+  if (exRecord) {
+    return { googleDriveData: { id: exRecord.id }, filePath: filePathAbs }
+  }
+  return await uploadFile({ config, filePath, dirId, verbose })
 }
 
 const getPublicUrl = async ({ config, fileId }: { config: Config; fileId: string }) => {
@@ -206,6 +182,7 @@ export const googleDrive = {
   searchFiles,
   downloadFile,
   uploadFile,
+  uploadFileIfNotUploaded,
   getAllFilesInDir,
   getPublicUrl,
 }

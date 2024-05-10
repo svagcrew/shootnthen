@@ -17,6 +17,7 @@ export const extractAudioSimple = async ({
     ffmpeg(inputVideoPath)
       .outputOptions('-map 0:a:0') // Selects the first audio track
       .audioCodec('libmp3lame') // Sets the audio codec to mp3
+      .audioBitrate('320k')
       .noVideo() // No video data is processed
       .output(outputAudioPath)
       .on('end', () => {

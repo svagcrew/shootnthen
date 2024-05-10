@@ -6,6 +6,7 @@ import axios, { isAxiosError } from 'axios'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream'
+import { log } from 'svag-cli-utils'
 import util from 'util'
 const streamPipeline = util.promisify(pipeline)
 
@@ -15,13 +16,16 @@ const downloadVideoByPublicUrl = async ({
   title,
   config,
   lang,
+  verbose,
 }: {
   loomPublicUrl: string
   filePath?: string
   title?: string
   config: Config
   lang?: Lang
+  verbose?: boolean
 }) => {
+  verbose && log.normal(`Downloading loom video from ${loomPublicUrl}`)
   const loomTitle = (await getVideoTitleByPublicUrl({ loomPublicUrl })).title
   title = title || loomTitle
   const filePathAbs = (() => {
@@ -87,6 +91,7 @@ const downloadVideoByPublicUrl = async ({
     exRecord.title = loomTitle
   }
   updateMeta({ meta, metaFilePath })
+  verbose && log.normal(`Downloaded loom video to ${filePathAbs}`)
   return {
     filePath: filePathAbs,
     title,

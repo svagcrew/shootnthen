@@ -1,7 +1,7 @@
-import { getConfig } from '@/lib/config'
-import fg from 'fast-glob'
-import path from 'path'
-import { stringsToLikeArrayString } from 'svag-cli-utils'
+// import { getConfig } from '@/lib/config'
+// import fg from 'fast-glob'
+// import path from 'path'
+// import { stringsToLikeArrayString } from 'svag-cli-utils'
 import z from 'zod'
 
 export const langsProcessedAllowed = ['ru', 'en'] as const
@@ -24,21 +24,21 @@ export type Lang = (typeof langs)[number]
 export type LangProcessed = (typeof langsProcessedAllowed)[number]
 export type LangRaw = (typeof langsRawAllowed)[number]
 
-export const getFilePathAndConfigByGlob = async ({ glob }: { glob: string }) => {
-  const filePaths = await fg([glob], {
-    onlyFiles: true,
-    absolute: true,
-    ignore: ['**/node_modules/**'],
-  })
-  if (filePaths.length === 0) {
-    throw new Error('File not found')
-  }
-  if (filePaths.length !== 1) {
-    throw new Error(`Multiple files found: ${stringsToLikeArrayString(filePaths)}`)
-  }
-  const filePath = filePaths[0]
-  const config = getConfig({ dirPath: path.dirname(filePath) })
-  return { filePath, config }
-}
+// export const getFilePathAndConfigByGlob = async ({ glob }: { glob: string }) => {
+//   const filePaths = await fg([glob], {
+//     onlyFiles: true,
+//     absolute: true,
+//     ignore: ['**/node_modules/**'],
+//   })
+//   if (filePaths.length === 0) {
+//     throw new Error('File not found')
+//   }
+//   if (filePaths.length !== 1) {
+//     throw new Error(`Multiple files found: ${stringsToLikeArrayString(filePaths)}`)
+//   }
+//   const filePath = filePaths[0]
+//   const config = getConfig({ dirPath: path.dirname(filePath) })
+//   return { filePath, config }
+// }
 
 export const wait = async (s: number) => new Promise((resolve) => setTimeout(resolve, s * 1000))

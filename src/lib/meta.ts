@@ -34,6 +34,21 @@ export const zMeta = z.object({
         .default([]),
     })
     .default({ projects: [] }),
+  youtube: z
+    .object({
+      videos: z
+        .array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            viewUrl: z.string(),
+            editUrl: z.string(),
+            filePath: z.string(),
+          })
+        )
+        .default([]),
+    })
+    .default({ videos: [] }),
   elevenlabs: z
     .object({
       dubbings: z
