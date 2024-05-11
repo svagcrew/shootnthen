@@ -1,6 +1,7 @@
 import { Config } from '@/lib/config'
-import { fromRawLang, langsProcessedAllowed, langsRawAllowed } from '@/lib/utils'
+import { langs as allLangs, fromRawLang, langsProcessedAllowed, langsRawAllowed } from '@/lib/utils'
 import fsync from 'fs'
+import _ from 'lodash'
 import path from 'path'
 import { getDataFromFileSync, isFileExistsSync } from 'svag-cli-utils'
 import z from 'zod'
@@ -101,6 +102,8 @@ export const zMeta = z.object({
         .array(
           z.object({
             id: z.string(),
+            dirId: z.string(),
+            filePath: z.string(),
             name: z.string(),
           })
         )
@@ -122,7 +125,7 @@ export const parseFileName = (fileName: string) => {
   const langSingle = langs.length === 1 ? langs[0] : null
   const notMarks = parts.filter((part) => !marksAllowed.includes(part))
   const marks = parts.filter((part) => marksAllowed.includes(part))
-  const notLangMarks = marks.filter((part) => !langs.includes(part))
+  const notLangMarks = marks.filter((part) => !allLangs.includes(part as any))
   const name = notMarks.join('.')
 
   return { name, langsProcessed, langsRaw, langs, marks, notLangMarks, ext, langSingle, basename }
@@ -152,5 +155,27 @@ export const getMetaByFilePath = ({ filePath, config }: { filePath: string; conf
 }
 
 export const updateMeta = ({ meta, metaFilePath }: { meta: Meta; metaFilePath: string }) => {
-  fsync.writeFileSync(metaFilePath, JSON.stringify(meta, null, 2))
+  const result = _.cloneDeep(meta) as any
+  if (!result.loom.videos.length) {
+    delete result.loom
+  }
+  if (!result.auphonic.projects.length) {
+    delete result.auphonic
+  }
+  if (!result.youtube.videos.length) {
+    delete result.youtube
+  }
+  if (!result.elevenlabs.dubbings.length) {
+    delete result.elevenlabs
+  }
+  if (!result.rask.projects.length) {
+    delete result.rask
+  }
+  if (!result.kinescope.videos.length) {
+    delete result.kinescope
+  }
+  if (!result.googleDrive.files.length) {
+    delete result.googleDrive
+  }
+  fsync.writeFileSync(metaFilePath, JSON.stringify(result, null, 2))
 }

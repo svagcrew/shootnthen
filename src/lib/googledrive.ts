@@ -4,7 +4,7 @@ import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
 import fsync from 'fs'
 import { google } from 'googleapis'
 import path from 'path'
-import { log } from 'svag-cli-utils'
+import { isFileExists, log } from 'svag-cli-utils'
 
 type GoogleDriveFile = {
   id: string
@@ -60,27 +60,94 @@ const searchFiles = async ({
   return matchedFiles
 }
 
+const getGoogleDriveFileMeta = async ({ config, fileId }: { config: Config; fileId: string }) => {
+  const { drive } = await getDrive({ config })
+  const res = await drive.files.get({ fileId, fields: 'name,parents,size' })
+  const googleDriveFileMeta = res.data
+  const dirId = googleDriveFileMeta.parents?.[0]
+  const name = googleDriveFileMeta.name
+  const size = googleDriveFileMeta.size ? Number(googleDriveFileMeta.size) : null
+  if (!dirId || !name || !size) {
+    throw new Error('No dirId or name or size in google drive file meta')
+  }
+  return { dirId, name, size }
+}
+
+const getFileIdFromUrl = (fileUrl: string) => {
+  // https://drive.google.com/file/d/106DebrXU6KW-p05mRXCP8lALetUJjmRz/view?usp=drive_link
+  const googleDriveFileId = fileUrl.match(/\/file\/d\/([^/]+)/)?.[1]
+  if (!googleDriveFileId) {
+    throw new Error('No fileId in url')
+  }
+  return { googleDriveFileId }
+}
+
 const downloadFile = async ({
   config,
-  fileId,
-  filePath,
   verbose,
+  force,
+  ...restProps
 }: {
   config: Config
-  fileId: string
-  filePath: string
+  filePath?: string
   verbose?: boolean
-}) => {
-  verbose && log.normal('Downloading google drive file', fileId, filePath)
-  const { drive } = await getDrive({ config })
+  force?: boolean
+} & (
+  | {
+      fileId: string
+    }
+  | {
+      fileUrl: string
+    }
+)) => {
+  verbose && log.normal('Downloading google drive file', { ...restProps })
+  const fileId =
+    'fileId' in restProps && restProps.fileId
+      ? restProps.fileId
+      : 'fileUrl' in restProps && restProps.fileUrl
+        ? getFileIdFromUrl(restProps.fileUrl).googleDriveFileId
+        : null
+  if (!fileId) {
+    throw new Error('No fileId')
+  }
+  const { dirId, name, size } = await getGoogleDriveFileMeta({ config, fileId })
+  if (!dirId) {
+    throw new Error('No dirId')
+  }
+  const filePath = 'filePath' in restProps && restProps.filePath ? restProps.filePath : name
+  if (!filePath) {
+    throw new Error('No file path')
+  }
   const filePathAbs = path.resolve(config.contentDir, filePath)
-  const { meta, metaFilePath } = getMetaByFilePath({ filePath, config })
+  const { drive } = await getDrive({ config })
+  const { meta, metaFilePath } = getMetaByFilePath({ filePath: filePathAbs, config })
+  const exRecordBefore = meta.googleDrive.files.find((file) => file.id === fileId && file.filePath === filePathAbs)
+  if (exRecordBefore && !force) {
+    const { fileExists } = await isFileExists({ filePath: filePathAbs })
+    if (fileExists) {
+      verbose && log.normal('File already downloaded', { filePath, fileId })
+      return { filePath: filePathAbs }
+    }
+  }
+
   await new Promise((resolve, reject) => {
+    let receivedBytes = 0
+    let lastLogAt: Date | null = null
     const dest = fsync.createWriteStream(filePathAbs)
     drive.files
       .get({ fileId, alt: 'media' }, { responseType: 'stream' })
       .then((res) => {
         res.data
+          .on('data', (chunk) => {
+            receivedBytes += chunk.length
+            const percentage = ((receivedBytes / size) * 100).toFixed(2)
+            const secondsSinceLastLog = lastLogAt ? (new Date().getTime() - lastLogAt.getTime()) / 1000 : 0
+            const shouldLog = !lastLogAt || secondsSinceLastLog > 1
+            if (shouldLog) {
+              lastLogAt = new Date()
+              verbose && log.normal(`Download progress: ${percentage}%`)
+            }
+          })
           .on('end', () => {
             resolve(true)
           })
@@ -94,12 +161,17 @@ const downloadFile = async ({
       })
   })
   const fileBasename = path.basename(filePathAbs)
+  const parsedFileName = parseFileName(fileBasename)
   const exRecord = meta.googleDrive.files.find((file) => file.id === fileId)
   if (!exRecord) {
-    meta.googleDrive.files.push({ id: fileId, name: fileBasename })
+    meta.googleDrive.files.push({ id: fileId, name: fileBasename, dirId, filePath: filePathAbs })
     updateMeta({ meta, metaFilePath })
   }
-  verbose && log.normal('Downloaded google drive file', fileId, filePath)
+  if (!meta.title) {
+    meta.title = parsedFileName.name
+    updateMeta({ meta, metaFilePath })
+  }
+  verbose && log.normal('Downloaded google drive file', { filePath, fileId })
   return { filePath: filePathAbs }
 }
 
@@ -142,7 +214,7 @@ const uploadFile = async ({
   if (!id) {
     throw new Error('No id after upload')
   }
-  meta.googleDrive.files.push({ id, name: fileBasename })
+  meta.googleDrive.files.push({ id, name: fileBasename, dirId, filePath: filePathAbs })
   updateMeta({ meta, metaFilePath })
   verbose && log.normal('Uploaded file to google drive', { filePath, dirId })
   return {

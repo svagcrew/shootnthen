@@ -25,6 +25,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     keys: ['verbose'],
     coalesce: true,
   })
+  const force = getFlagAsBoolean({
+    flags,
+    keys: ['force'],
+    coalesce: false,
+  })
   const { config } = await getConfig({
     dirPath: cwd,
   })
@@ -37,6 +42,42 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     }
     case 'download-from-google-drive':
     case 'dg': {
+      const { fileId, fileUrl, filePath } = z
+        .object({
+          fileId: z.string().optional(),
+          fileUrl: z.string().optional(),
+          filePath: z.string().optional(),
+        })
+        .parse({
+          fileId: getFlagAsString({
+            flags,
+            keys: ['file-id', 'i'],
+            coalesce: undefined,
+          }),
+          fileUrl: getFlagAsString({
+            flags,
+            keys: ['file-url', 'u'],
+            coalesce: undefined,
+          }),
+          filePath: getFlagAsString({
+            flags,
+            keys: ['file-path', 'p'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await googleDrive.downloadFile({
+        config,
+        filePath,
+        fileId: fileId as string,
+        fileUrl: fileUrl as string,
+        force,
+        verbose,
+      })
+      log.green(result)
+      break
+    }
+    case 'download-from-google-drive-by-search':
+    case 'dgs': {
       const dirId = getFlagAsString({
         flags,
         keys: ['dir', 'd'],
@@ -667,15 +708,16 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         'loom',
         'extract',
         'auphonic',
+        'apply-original',
         'rask-cp',
         'rask-sd',
         'rask-dd',
-        'apply',
+        'apply-all',
         'upload',
         'youtube',
       ] as const
       type Step = (typeof steps)[number]
-      const { pause, loomPublicUrl, filePath, srcLang, distLangs, googleDriveDirId, firstStep } = z
+      const { pause, loomPublicUrl, filePath, srcLang, distLangs, googleDriveDirId, firstStep, raskInputFormat } = z
         .object({
           pause: z.boolean().optional().nullable(),
           loomPublicUrl: z.string().optional().nullable(),
@@ -684,6 +726,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           distLangs: z.array(zLangProcessed),
           googleDriveDirId: z.string(),
           firstStep: z.enum(steps),
+          raskInputFormat: z.enum(['mp3', 'mp4']),
         })
         .parse({
           pause: getFlagAsBoolean({
@@ -725,6 +768,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
               keys: ['step', 's'],
               coalesce: undefined,
             }) || 'loom',
+          raskInputFormat: getFlagAsString({
+            flags,
+            keys: ['rask-format', 'rf'],
+            coalesce: 'mp4',
+          }),
         })
 
       const isStepActual = (step: Step) => steps.indexOf(step) >= steps.indexOf(firstStep)
@@ -774,6 +822,21 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         : {
             filePath: auphonicDistFilePath,
           }
+
+      const applyOriginalAudioToVideoResult = isStepActual('apply-original')
+        ? await applyAudiosToVideo({
+            inputVideoPath: filePathAbs,
+            config,
+            langs: [originalLangProcessed],
+            verbose,
+          })
+        : {
+            outputVideoPath: path.resolve(
+              path.dirname(filePathAbs),
+              `${originalAudioParsedName.name}.${originalLangProcessed}.mp4`
+            ),
+          }
+
       const raskDistMp3sPaths: string[] = []
       const { meta } = getMetaByFilePath({ filePath: extractResult.audioFilePath, config })
       for (const distLang of distLangs) {
@@ -794,9 +857,18 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
         const projectId = await (async () => {
           if (isStepActual('rask-cp')) {
+            const raskInputPath = (() => {
+              if (raskInputFormat === 'mp4') {
+                return applyOriginalAudioToVideoResult.outputVideoPath
+              }
+              if (raskInputFormat === 'mp3') {
+                return auphonicResult.filePath
+              }
+              throw new Error('raskInputFormat not supported')
+            })()
             const { projectId, processed } = await rask.createProjectWithBrowserByFilePath({
               config,
-              filePath: auphonicResult.filePath,
+              filePath: raskInputPath,
               srcLang: originalLangProcessed,
               distLang,
               verbose,
@@ -841,12 +913,21 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           raskDistMp3sPaths.push(distMp3Path)
         }
       }
-      const applyAudiosToVideoResult = await applyAudiosToVideo({
-        inputVideoPath: filePathAbs,
-        config,
-        langs: distLangs,
-        verbose,
-      })
+      const applyAllAudiosToVideoResult = isStepActual('apply-all')
+        ? distLangs.length === 1 && fromRawLang(srcLang) === distLangs[0]
+          ? applyOriginalAudioToVideoResult
+          : await applyAudiosToVideo({
+              inputVideoPath: filePathAbs,
+              config,
+              langs: distLangs,
+              verbose,
+            })
+        : {
+            outputVideoPath: path.resolve(
+              path.dirname(filePathAbs),
+              `${originalAudioParsedName.name}.${distLangs.join('.')}.mp4`
+            ),
+          }
       const valuableFilesPaths = [
         filePathAbs,
         extractResult.audioFilePath,
@@ -864,7 +945,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         const youtubeResult = await youtube.uploadFile({
           config,
           title: meta.title || `Untitled ${new Date().toISOString()}`,
-          filePath: applyAudiosToVideoResult.outputVideoPath,
+          filePath: applyAllAudiosToVideoResult.outputVideoPath,
           verbose,
         })
       }
@@ -879,31 +960,34 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     }
     case 'h': {
       log.black(dedent`Commands:
-        dg | download-from-google-drive --dir <dirId> <search>
-        ug | upload-to-google-drive --dir <dirId> <files>
-        sg | search-google-drive --dir <dirId> <search>
+        c | config
 
-        uk | upload-to-kinescope --parent <parentId> --video <videoId> <filePath>
+        dg | download-from-google-drive ?--file-id(-i) <fileId> ?--file-path(-p) <filePath> ?--file-url(-u) <fileUrl>
+        dgs | download-from-google-drive-by-search <search> --dir <dirId> 
+        ug | upload-to-google-drive --dir <dirId> <files>
+        sg | search-google-drive <search> --dir <dirId>
+
+        uk | upload-to-kinescope <filePath> --parent <parentId> --video <videoId>
         lkp | list-kinescope-projects
 
-        ea | extract-audio --lang <lang> <filePath>
+        ea | extract-audio <filePath> --lang <lang>
         cwm | convert-wav-to-mp3 <inputWavPath> <outputMp3Path>
-        aa | apply-audios --langs <langs> <inputVideoPath>
+        aa | apply-audios <inputVideoPath> --langs <langs>
 
-        elcd | elevenlabs-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
-        elcdu | elevenlabs-create-dubbing-by-url --src-lang <srcLang> --dist-lang <distLang> --file <filePath> <url>
-        elcdb | elevenlabs-create-dubbing-with-browser --src-lang <srcLang> --dist-lang <distLang> <filePath>
+        elcd | elevenlabs-create-dubbing <filePath> --src-lang <srcLang> --dist-lang <distLang>
+        elcdu | elevenlabs-create-dubbing-by-url <url> --src-lang <srcLang> --dist-lang <distLang> --file <filePath>
+        elcdb | elevenlabs-create-dubbing-with-browser <filePath> --src-lang <srcLang> --dist-lang <distLang>
         elgd | elevenlabs-get-dubbing <dubbingId>
         eldd | elevenlabs-download-dubbing --dubbing <dubbingId> --file <filePath> --lang <lang>
-        eda | elevenlabs-dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
+        eda | elevenlabs-dub-audio <srcFilePath> --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath>
 
-        rcd | rask-create-dubbing --src-lang <srcLang> --dist-lang <distLang> <filePath>
+        rcd | rask-create-dubbing <filePath> --src-lang <srcLang> --dist-lang <distLang>
         rgds | rask-get-dubbing-status <dubbingId>
         rsd | rask-start-dubbing <dubbingId>
         rdd | rask-download-dubbing --project <projectId> --file <filePath>
-        rda | rask-dub-audio --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath> <srcFilePath>
+        rda | rask-dub-audio <srcFilePath> --src-lang <srcLang> --dist-lang <distLang> --dist-file-path <distFilePath>
 
-        ld | loom-download <loomPublicUrl> <filePath>?
+        ld | loom-download <loomPublicUrl> <?filePath>
 
         acp | auphonic-create-project --preset <presetId> <filePath>
         agp | auphonic-get-project <projectId>
