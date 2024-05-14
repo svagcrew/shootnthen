@@ -1,4 +1,5 @@
+import svagPrettierConfigBase from 'svag-prettier/configs/base.js'
 /** @type {import("prettier").Config} */
-module.exports = {
-  ...require('svag-prettier/configs/base'),
+export default {
+  ...svagPrettierConfigBase,
 }
