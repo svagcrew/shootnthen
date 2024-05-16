@@ -23,8 +23,9 @@
   },
   "main": "./dist/exports.js",
   "files": [
-    "./bin/**/*",
-    "./dist/**/*"
+    "./src/**/*",
+    "./dist/**/*",
+    "./bin/**/*"
   ],
   "scripts": {
     "prettify": "svag-prettier prettify",
@@ -51,11 +52,11 @@
     "onchange": "^7.1.0",
     "prettier": "^3.2.5",
     "rimraf": "^5.0.5",
-    "svag-husky": "^0.1.31",
-    "svag-jest": "^0.1.32",
-    "svag-lint": "^0.1.54",
-    "svag-prettier": "^0.1.45",
-    "svag-ts": "^0.1.50",
+    "svag-husky": "^0.1.35",
+    "svag-jest": "^0.1.33",
+    "svag-lint": "^0.1.58",
+    "svag-prettier": "^0.1.49",
+    "svag-ts": "^0.1.54",
     "ts-jest": "^29.1.2",
     "tsc-alias": "^1.8.10",
     "typescript": "^5.4.5"
@@ -76,7 +77,7 @@
     "puppeteer": "^22.8.0",
     "readline-sync": "^1.4.10",
     "source-map-support": "^0.5.21",
-    "svag-cli-utils": "^0.1.49",
+    "svag-cli-utils": "^0.1.53",
     "transliteration": "^2.3.5",
     "zod": "^3.23.6"
   }
