@@ -41,4 +41,4 @@ export type LangRaw = (typeof langsRawAllowed)[number]
 //   return { filePath, config }
 // }
 
-export const wait = async (s: number) => new Promise((resolve) => setTimeout(resolve, s * 1000))
+export const wait = async (s: number) => await new Promise((resolve) => setTimeout(resolve, s * 1_000))

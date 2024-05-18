@@ -1,6 +1,7 @@
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { parseFileName } from '@/lib/meta'
-import { fromRawLang, Lang } from '@/lib/utils'
+import type { Lang } from '@/lib/utils'
+import { fromRawLang } from '@/lib/utils'
 import ffmpeg from 'fluent-ffmpeg'
 import langCodesLib from 'langs'
 import path from 'path'
@@ -13,7 +14,7 @@ export const extractAudioSimple = async ({
   inputVideoPath: string
   outputAudioPath: string
 }) => {
-  return new Promise((resolve, reject) => {
+  return await new Promise((resolve, reject) => {
     ffmpeg(inputVideoPath)
       .outputOptions('-map 0:a:0') // Selects the first audio track
       .audioCodec('libmp3lame') // Sets the audio codec to mp3
@@ -67,14 +68,14 @@ export const applyAudiosToVideoSimple = async ({
   outputVideoPath: string
 }) => {
   let nativeCommand = `ffmpeg -i "${inputVideoPath}"`
-  inputAudios.forEach((audio) => {
+  for (const audio of inputAudios) {
     nativeCommand += ` -i "${audio.audioPath}"`
-  })
+  }
   nativeCommand += ` -map 0:v`
-  inputAudios.forEach((_, index) => {
+  for (const [index] of inputAudios.entries()) {
     nativeCommand += ` -map ${index + 1}:a`
-  })
-  inputAudios.forEach((audio, index) => {
+  }
+  for (const [index, audio] of inputAudios.entries()) {
     const langData = langCodesLib.where('1', audio.lang)
     if (!langData) {
       throw new Error(`Language not found: ${audio.lang}`)
@@ -84,7 +85,7 @@ export const applyAudiosToVideoSimple = async ({
       throw new Error(`Language not found: ${audio.lang}`)
     }
     nativeCommand += ` -metadata:s:a:${index} language=${lang2}`
-  })
+  }
   nativeCommand += ` -c:v copy -c:a aac -y "${outputVideoPath}"`
   await spawn({ command: nativeCommand, cwd: process.cwd() })
 }

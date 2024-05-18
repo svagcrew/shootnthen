@@ -1,7 +1,7 @@
-import { Config } from '@/exports'
+import type { Config } from '@/exports'
 import { replaceIllegalSymbolsFromFileName } from '@/lib/fs'
 import { getMetaByFilePath, updateMeta } from '@/lib/meta'
-import { Lang } from '@/lib/utils'
+import type { Lang } from '@/lib/utils'
 import axios, { isAxiosError } from 'axios'
 import fs from 'fs'
 import path from 'path'
@@ -60,11 +60,11 @@ const downloadVideoByPublicUrl = async ({
         url: `https://www.loom.com/api/campaigns/sessions/${loomId}/transcoded-url`,
         headers: {},
       })
-    } catch (err) {
-      if (isAxiosError(err) && err.response?.data) {
-        throw new Error(JSON.stringify(err.response.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.data) {
+        throw new Error(JSON.stringify(error.response.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
   const loomDownloadUrl = res.data.url
@@ -80,11 +80,11 @@ const downloadVideoByPublicUrl = async ({
       })
       await streamPipeline(response.data, fs.createWriteStream(filePathAbs))
       return response
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error)) {
+        throw new Error(JSON.stringify(error.response?.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
   const exRecord = meta.loom.videos.find((v) => v.id === loomId)
@@ -113,11 +113,11 @@ const getVideoTitleByPublicUrl = async ({ loomPublicUrl }: { loomPublicUrl: stri
         method: 'get',
         url: loomPublicUrl,
       })
-    } catch (err) {
-      if (isAxiosError(err) && err.response?.data) {
-        throw new Error(JSON.stringify(err.response.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.data) {
+        throw new Error(JSON.stringify(error.response.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
   const titleRaw = res.data.match(/<title>(.*)<\/title>/)?.[1] as string

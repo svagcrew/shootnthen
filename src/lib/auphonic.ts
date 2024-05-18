@@ -1,4 +1,4 @@
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { getEnv } from '@/lib/env'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
 import { wait } from '@/lib/utils'
@@ -105,11 +105,11 @@ const createProject = async ({
         },
         data: form,
       })
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error)) {
+        throw new Error(JSON.stringify(error.response?.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
   const projectId = res.data.data?.uuid
@@ -141,11 +141,11 @@ const getProject = async ({ projectId, verbose }: { projectId: string; verbose?:
           password,
         },
       })
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error_) {
+      if (isAxiosError(error_)) {
+        throw new Error(JSON.stringify(error_.response?.data, null, 2))
       }
-      throw err
+      throw error_
     }
   })()
   const error = res.data.error_message
@@ -195,7 +195,7 @@ const waitWhileProcessing = async ({
   error: undefined
   outputs: Output[]
 }> => {
-  const result = await getProject({ projectId: projectId, verbose })
+  const result = await getProject({ projectId, verbose })
   if (result.status === 'done') {
     verbose && log.normal('Processing finished', result)
     return { ...result, status: 'done' }
@@ -259,11 +259,11 @@ const downloadProject = async ({
       })
       await streamPipeline(response.data, fs.createWriteStream(filePathAbs))
       return response
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error)) {
+        throw new Error(JSON.stringify(error.response?.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
 

@@ -1,4 +1,4 @@
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { getGoogleAuthClient } from '@/lib/google'
 import { getMetaByFilePath, updateMeta } from '@/lib/meta'
 import fsync from 'fs'

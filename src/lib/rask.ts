@@ -1,14 +1,15 @@
 import { googleDrive } from '@/exports'
 import { closeBrowser, visitPage } from '@/lib/browser'
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { converWavToMp3 } from '@/lib/editor'
 import { getEnv } from '@/lib/env'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
-import { LangProcessed, wait } from '@/lib/utils'
+import type { LangProcessed } from '@/lib/utils'
+import { wait } from '@/lib/utils'
 import axios, { isAxiosError } from 'axios'
 import fs from 'fs'
 import path from 'path'
-import { ElementHandle, Page } from 'puppeteer'
+import type { ElementHandle, Page } from 'puppeteer'
 import { pipeline } from 'stream'
 import { isFileExists, log } from 'svag-cli-utils'
 import util from 'util'
@@ -38,7 +39,7 @@ const authorize = async ({ verbose, retryNumber = 0 }: { verbose?: boolean; retr
           signInButton: null,
           authorizedHeader: null,
         })
-      }, 20000)
+      }, 20_000)
       const interval = setInterval(() => {
         void (async () => {
           const signInButton = await page.$(signInButtonSelector)
@@ -52,7 +53,7 @@ const authorize = async ({ verbose, retryNumber = 0 }: { verbose?: boolean; retr
             })
           }
         })()
-      }, 1000)
+      }, 1_000)
     })
     if (!signInButton && !authorizedHeader) {
       throw new Error('No account button and no sign in button')
@@ -85,15 +86,15 @@ const authorize = async ({ verbose, retryNumber = 0 }: { verbose?: boolean; retr
       await page.waitForSelector(authorizedHeaderSelector)
       verbose && log.normal('Signed in')
       return { page }
-    } catch (err) {
+    } catch {
       throw new Error('No authorized header after sign in')
     }
-  } catch (err) {
+  } catch (error) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
       return await authorize({ verbose, retryNumber: retryNumber + 1 })
     }
-    throw err
+    throw error
   }
 }
 
@@ -182,7 +183,7 @@ const createProjectWithBrowserByFilePath = async ({
         verbose,
       })
     }
-  } catch (err) {
+  } catch (error) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
       return await createProjectWithBrowserByFilePath({
@@ -195,7 +196,7 @@ const createProjectWithBrowserByFilePath = async ({
         retryNumber: retryNumber + 1,
       })
     }
-    throw err
+    throw error
   }
 }
 
@@ -345,7 +346,7 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
     await closeBrowser()
     verbose && log.normal('Dubbing created')
     return { projectId, srcLang, distLang, processed: true }
-  } catch (err) {
+  } catch (error) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
       return await createProjectWithBrowserByUrlAndFilePath({
@@ -359,7 +360,7 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
         retryNumber: retryNumber + 1,
       })
     }
-    throw err
+    throw error
   }
 }
 
@@ -415,12 +416,12 @@ const getProjectStatusWithBrowser = async ({
     await closeBrowser()
     verbose && log.normal('Dubbing status got', projectId, status)
     return { status }
-  } catch (err) {
+  } catch (error) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
       return await getProjectStatusWithBrowser({ projectId, verbose, retryNumber: retryNumber + 1 })
     }
-    throw err
+    throw error
   }
 }
 
@@ -450,7 +451,7 @@ const startDubbingWithBrowser = async ({
 
     const buttons = await page.$$('button[type="button"]')
     const buttonsDub = await (async () => {
-      const result: Array<ElementHandle> = []
+      const result: ElementHandle[] = []
       for (const button of buttons) {
         const text = await button.evaluate((el) => el.textContent)
         if (text.includes('Dub Video')) {
@@ -470,7 +471,7 @@ const startDubbingWithBrowser = async ({
 
     const buttons1 = await page.$$('button[type="button"]')
     const buttonsDub1 = await (async () => {
-      const result: Array<ElementHandle> = []
+      const result: ElementHandle[] = []
       for (const button of buttons1) {
         const text = await button.evaluate((el) => el.textContent)
         if (text.includes('Dub Video')) {
@@ -485,11 +486,11 @@ const startDubbingWithBrowser = async ({
       return { processed: true }
     }
     if (buttonsDub1.length === 2) {
-      buttonsDub1[1].press('Enter')
+      await buttonsDub1[1].press('Enter')
       await wait(2)
       const buttons11 = await page.$$('button[type="button"]')
       const buttonsDub11 = await (async () => {
-        const result: Array<ElementHandle> = []
+        const result: ElementHandle[] = []
         for (const button of buttons11) {
           const text = await button.evaluate((el) => el.textContent)
           if (text.includes('Dub Video')) {
@@ -506,12 +507,12 @@ const startDubbingWithBrowser = async ({
       throw new Error('Dubbing not started after second click')
     }
     throw new Error('Dubbing not started after first click, and no second button found')
-  } catch (err) {
+  } catch (error) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
       return await startDubbingWithBrowser({ projectId, verbose, retryNumber: retryNumber + 1 })
     }
-    throw err
+    throw error
   }
 }
 
@@ -538,12 +539,12 @@ const waitWhileProcessingWithBrowser = async ({
     const awaitedResult = await waitWhileProcessingWithBrowser({ projectId })
     verbose && log.normal('Processing finished', result)
     return awaitedResult
-  } catch (err) {
+  } catch (error) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
       return await waitWhileProcessingWithBrowser({ projectId, verbose, retryNumber: retryNumber + 1 })
     }
-    throw err
+    throw error
   }
 }
 
@@ -622,11 +623,11 @@ const downloadDubbingWithBrowser = async ({
         })
         await streamPipeline(response.data, fs.createWriteStream(filePathAbs))
         return response
-      } catch (err) {
-        if (isAxiosError(err)) {
-          throw new Error(JSON.stringify(err.response?.data, null, 2))
+      } catch (error) {
+        if (isAxiosError(error)) {
+          throw new Error(JSON.stringify(error.response?.data, null, 2))
         }
-        throw err
+        throw error
       }
     })()
 
@@ -637,7 +638,7 @@ const downloadDubbingWithBrowser = async ({
     }
     verbose && log.normal('Downloaded dubbing', projectId)
     return { filePath: filePathAbs }
-  } catch (err) {
+  } catch (error) {
     await closeBrowser()
     if (retryNumber < maxRetryNumber) {
       return await downloadDubbingWithBrowser({
@@ -649,7 +650,7 @@ const downloadDubbingWithBrowser = async ({
         retryNumber: retryNumber + 1,
       })
     }
-    throw err
+    throw error
   }
 }
 

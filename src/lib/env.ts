@@ -1,3 +1,4 @@
+/* eslint-disable n/no-process-env */
 import * as dotenv from 'dotenv'
 import fs from 'fs'
 import path from 'path'

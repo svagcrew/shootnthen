@@ -1,9 +1,10 @@
 /* eslint-disable no-useless-catch */
 import { closeBrowser, visitPage } from '@/lib/browser'
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { getEnv } from '@/lib/env'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
-import { LangProcessed, wait } from '@/lib/utils'
+import type { LangProcessed } from '@/lib/utils'
+import { wait } from '@/lib/utils'
 import axios, { isAxiosError } from 'axios'
 import FormData from 'form-data'
 import fs from 'fs'
@@ -83,11 +84,11 @@ const createDubbing = async ({
         },
         data: form,
       })
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error)) {
+        throw new Error(JSON.stringify(error.response?.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
   const dubbingId = res.data.dubbing_id
@@ -144,6 +145,7 @@ const createDubbingByUrl = async ({
 
   const form = (() => {
     const result = new FormData()
+    // eslint-disable-next-line guard-for-in
     for (const key in data) {
       result.append(key, (data as any)[key])
     }
@@ -162,11 +164,11 @@ const createDubbingByUrl = async ({
         },
         data: form,
       })
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error)) {
+        throw new Error(JSON.stringify(error.response?.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
   const dubbingId = res.data.dubbing_id
@@ -202,11 +204,11 @@ const getDubbing = async ({ dubbingId, verbose }: { dubbingId: string; verbose?:
           'xi-api-key': apiKey,
         },
       })
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error_) {
+      if (isAxiosError(error_)) {
+        throw new Error(JSON.stringify(error_.response?.data, null, 2))
       }
-      throw err
+      throw error_
     }
   })()
   const error = res.data.error
@@ -289,11 +291,11 @@ const downloadDubbing = async ({
       })
       await streamPipeline(response.data, fs.createWriteStream(filePathAbs))
       return response
-    } catch (err) {
-      if (isAxiosError(err)) {
-        throw new Error(JSON.stringify(err.response?.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error)) {
+        throw new Error(JSON.stringify(error.response?.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
 
@@ -318,12 +320,12 @@ const authorize = async ({ verbose }: { verbose?: boolean } = {}) => {
   const signInButtonSelector = '[data-testid="sign-in-button"]'
   try {
     await page.waitForSelector(signInButtonSelector)
-  } catch (err) {
+  } catch {
     try {
       await page.waitForSelector(dubbingProjectNameInputSelector)
       verbose && log.normal('Already authorized')
       return
-    } catch (err) {
+    } catch {
       throw new Error('No account button and no sign in button')
     }
   }
@@ -351,7 +353,7 @@ const authorize = async ({ verbose }: { verbose?: boolean } = {}) => {
   try {
     await page.waitForSelector(dubbingProjectNameInputSelector)
     verbose && log.normal('Signed in')
-  } catch (err) {
+  } catch {
     throw new Error('No dubbing project name input after login')
   }
 }
@@ -467,12 +469,12 @@ const createDubbingWithBrowser = async ({
       srcUrl: null,
     })
     updateMeta({ meta, metaFilePath })
-    closeBrowser()
+    await closeBrowser()
     verbose && log.normal('Dubbing created')
     return { dubbingId, duration, srcLang, distLang }
-  } catch (err) {
+  } catch (error) {
     // closeBrowser()
-    throw err
+    throw error
   }
 }
 
@@ -506,6 +508,7 @@ const createWaitDownloadDubbing = async ({
     lang: distLang,
     verbose,
   })
+  return { ok: true }
 }
 
 export const elevenlabs = {

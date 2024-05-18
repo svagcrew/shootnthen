@@ -1,4 +1,4 @@
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { getEnv } from '@/lib/env'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
 import axios, { isAxiosError } from 'axios'
@@ -55,11 +55,11 @@ const uploadFile = async ({
         },
         data: fileDataBinary,
       })
-    } catch (err) {
-      if (isAxiosError(err) && err.response?.data) {
-        throw new Error(JSON.stringify(err.response.data, null, 2))
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.data) {
+        throw new Error(JSON.stringify(error.response.data, null, 2))
       }
-      throw err
+      throw error
     }
   })()
 
@@ -81,11 +81,11 @@ const uploadFile = async ({
         title,
       },
     })
-  } catch (err: any) {
-    if (isAxiosError(err)) {
-      log.red(JSON.stringify(err.response?.data, null, 2))
+  } catch (error: any) {
+    if (isAxiosError(error)) {
+      log.red(JSON.stringify(error.response?.data, null, 2))
     }
-    log.red(err?.message || err)
+    log.red(error?.message || error)
   }
   verbose && log.normal('Changed title in Kinescope')
 

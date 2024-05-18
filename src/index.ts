@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import 'source-map-support/register'
-
 import { auphonic } from '@/lib/auphonic'
 import { getConfig } from '@/lib/config'
 import { applyAudiosToVideo, converWavToMp3, extractAudio } from '@/lib/editor'
@@ -11,13 +10,14 @@ import { kinescope } from '@/lib/kinescope'
 import { loom } from '@/lib/loom'
 import { getMetaByFilePath, parseFileName } from '@/lib/meta'
 import { rask } from '@/lib/rask'
-import { fromRawLang, LangProcessed, zLang, zLangProcessed } from '@/lib/utils'
+import type { LangProcessed } from '@/lib/utils'
+import { fromRawLang, zLang, zLangProcessed } from '@/lib/utils'
 import { youtube } from '@/lib/youtube'
 import dedent from 'dedent'
 import path from 'path'
+import readlineSync from 'readline-sync'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
 import z from 'zod'
-import readlineSync from 'readline-sync'
 
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   const verbose = getFlagAsBoolean({

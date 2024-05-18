@@ -1,4 +1,4 @@
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { authenticate } from '@google-cloud/local-auth'
 import fs from 'fs/promises'
 import { google } from 'googleapis'
@@ -14,17 +14,17 @@ export const getGoogleAuthClient = async ({
 }> => {
   const SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/youtube']
 
-  async function loadSavedCredentialsIfExist() {
+  const loadSavedCredentialsIfExist = async () => {
     try {
       const content = await fs.readFile(config.googleTokenJsonPath, 'utf8')
       const credentials = JSON.parse(content)
       return google.auth.fromJSON(credentials)
-    } catch (err) {
+    } catch {
       return null
     }
   }
 
-  async function saveCredentials(client: any) {
+  const saveCredentials = async (client: any) => {
     const content = await fs.readFile(config.googleCredentialsJsonPath, 'utf8')
     const keys = JSON.parse(content)
     const key = keys.installed || keys.web

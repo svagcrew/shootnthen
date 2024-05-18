@@ -1,5 +1,5 @@
-import { Config } from '@/lib/config'
-import { langs as allLangs, fromRawLang, langsProcessedAllowed, langsRawAllowed } from '@/lib/utils'
+import type { Config } from '@/lib/config'
+import { fromRawLang, langs as allLangs, langsProcessedAllowed, langsRawAllowed } from '@/lib/utils'
 import fsync from 'fs'
 import _ from 'lodash'
 import path from 'path'

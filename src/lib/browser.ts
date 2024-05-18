@@ -1,5 +1,6 @@
 import path from 'path'
-import puppeteer, { Browser, Page } from 'puppeteer'
+import type { Browser, Page } from 'puppeteer'
+import puppeteer from 'puppeteer'
 import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -20,6 +21,7 @@ export const getBrowser = async () => {
           args: ['--no-sandbox', '--disable-setuid-sandbox'],
         }
   )
+  // eslint-disable-next-line require-atomic-updates
   openedBrowser = browser
   return browser
 }
@@ -33,9 +35,9 @@ export const closeBrowser = async () => {
 export const visitPage = async (url: string) => {
   const browser = await getBrowser()
   const page = await browser.newPage()
-  page.setDefaultTimeout(30000)
+  page.setDefaultTimeout(30_000)
   await page.goto(url)
-  await page.setViewport({ width: 1600, height: 600 })
+  await page.setViewport({ width: 1_600, height: 600 })
   return page
 }
 

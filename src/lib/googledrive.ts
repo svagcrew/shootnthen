@@ -1,4 +1,4 @@
-import { Config } from '@/lib/config'
+import type { Config } from '@/lib/config'
 import { getGoogleAuthClient } from '@/lib/google'
 import { getMetaByFilePath, parseFileName, updateMeta } from '@/lib/meta'
 import fsync from 'fs'
@@ -20,7 +20,7 @@ const getDrive = async ({ config }: { config: Config }) => {
 
 const getAllFilesInDir = async ({ config, dirId }: { config: Config; dirId: string }) => {
   const files: GoogleDriveFile[] = []
-  let nextPageToken: string | undefined = undefined
+  let nextPageToken: string | undefined
   do {
     const { drive } = await getDrive({ config })
     const res = await drive.files.list({
@@ -141,7 +141,7 @@ const downloadFile = async ({
           .on('data', (chunk) => {
             receivedBytes += chunk.length
             const percentage = ((receivedBytes / size) * 100).toFixed(2)
-            const secondsSinceLastLog = lastLogAt ? (new Date().getTime() - lastLogAt.getTime()) / 1000 : 0
+            const secondsSinceLastLog = lastLogAt ? (Date.now() - lastLogAt.getTime()) / 1_000 : 0
             const shouldLog = !lastLogAt || secondsSinceLastLog > 1
             if (shouldLog) {
               lastLogAt = new Date()
@@ -156,8 +156,8 @@ const downloadFile = async ({
           })
           .pipe(dest)
       })
-      .catch((err) => {
-        reject(err)
+      .catch((error) => {
+        reject(error)
       })
   })
   const fileBasename = path.basename(filePathAbs)
