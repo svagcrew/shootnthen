@@ -262,7 +262,7 @@ const createProjectWithBrowserByUrlAndFilePath = async ({
     const projectNameInput = getNonNullable(await page.$(projectNameInputSelector))
     await projectNameInput.click()
     await wait(1)
-    await projectNameInput.evaluate((el) => (el.value = ''))
+    await projectNameInput.evaluate((el) => ((el as any).value = ''))
     await page.type(projectNameInputSelector, projectName)
     await wait(1)
 
@@ -397,7 +397,7 @@ const getProjectStatusWithBrowser = async ({
     const buttonDub = await (async () => {
       for (const button of buttons) {
         const text = await button.evaluate((el) => el.textContent)
-        if (text.includes('Dub Video')) {
+        if (text?.includes('Dub Video')) {
           return button
         }
       }
@@ -454,7 +454,7 @@ const startDubbingWithBrowser = async ({
       const result: ElementHandle[] = []
       for (const button of buttons) {
         const text = await button.evaluate((el) => el.textContent)
-        if (text.includes('Dub Video')) {
+        if (text?.includes('Dub Video')) {
           result.push(button)
         }
       }
@@ -474,7 +474,7 @@ const startDubbingWithBrowser = async ({
       const result: ElementHandle[] = []
       for (const button of buttons1) {
         const text = await button.evaluate((el) => el.textContent)
-        if (text.includes('Dub Video')) {
+        if (text?.includes('Dub Video')) {
           result.push(button)
         }
       }
@@ -493,7 +493,7 @@ const startDubbingWithBrowser = async ({
         const result: ElementHandle[] = []
         for (const button of buttons11) {
           const text = await button.evaluate((el) => el.textContent)
-          if (text.includes('Dub Video')) {
+          if (text?.includes('Dub Video')) {
             result.push(button)
           }
         }
@@ -586,7 +586,7 @@ const downloadDubbingWithBrowser = async ({
     const buttonDownload = await (async () => {
       for (const button of buttons) {
         const text = await button.evaluate((el) => el.textContent)
-        if (text.includes('Download')) {
+        if (text?.includes('Download')) {
           return button
         }
       }
