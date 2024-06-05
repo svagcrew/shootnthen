@@ -1,5 +1,5 @@
 /* eslint-disable unicorn/no-unused-properties */
-import { zLang, zLangProcessed } from '@/lib/utils'
+import { zLang, zLangProcessed } from '@/lib/utils.js'
 import fg from 'fast-glob'
 import _ from 'lodash'
 import path from 'path'

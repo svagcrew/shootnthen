@@ -1,4 +1,4 @@
-import type { Config } from '@/lib/config'
+import type { Config } from '@/lib/config.js'
 import { authenticate } from '@google-cloud/local-auth'
 import fs from 'fs/promises'
 import { google } from 'googleapis'

@@ -1,5 +1,5 @@
-import type { Config } from '@/lib/config'
-import { fromRawLang, langs as allLangs, langsProcessedAllowed, langsRawAllowed } from '@/lib/utils'
+import type { Config } from '@/lib/config.js'
+import { fromRawLang, langs as allLangs, langsProcessedAllowed, langsRawAllowed } from '@/lib/utils.js'
 import fsync from 'fs'
 import _ from 'lodash'
 import path from 'path'

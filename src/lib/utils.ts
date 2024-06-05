@@ -1,4 +1,4 @@
-// import { getConfig } from '@/lib/config'
+// import { getConfig } from '@/lib/config.js'
 // import fg from 'fast-glob'
 // import path from 'path'
 // import { stringsToLikeArrayString } from 'svag-cli-utils'
