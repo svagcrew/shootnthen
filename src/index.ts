@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import 'source-map-support/register'
+import 'source-map-support/register.js'
 import { auphonic } from '@/lib/auphonic.js'
 import { getConfig } from '@/lib/config.js'
 import { applyAudiosToVideo, converWavToMp3, extractAudio } from '@/lib/editor.js'

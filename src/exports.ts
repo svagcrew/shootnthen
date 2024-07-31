@@ -1,4 +1,4 @@
-import 'source-map-support/register'
+import 'source-map-support/register.js'
 
 export { type Config, getConfig } from '@/lib/config.js'
 export { applyAudiosToVideo, extractAudio } from '@/lib/editor.js'
