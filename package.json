@@ -1,6 +1,6 @@
 {
   "name": "shootnthen",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "homepage": "https://github.com/svagcrew/shootnthen",
   "repository": {
     "type": "git",
@@ -17,26 +17,45 @@
   "publishConfig": {
     "access": "public"
   },
-  "type": "module",
+  "main": "./dist/exports.js",
   "bin": {
     "snt": "./bin/index.js"
   },
-  "main": "./dist/exports.js",
   "files": [
     "./src/**/*",
     "./dist/**/*",
     "./bin/**/*"
   ],
   "scripts": {
-    "prettify": "svag-prettier prettify",
-    "dev": "svag-ts dev",
-    "watch": "svag-ts watch",
-    "types": "svag-ts types",
     "build": "svag-ts build",
-    "start": "svag-ts start",
-    "prepare": "husky",
+    "dev": "svag-ts dev",
     "lint": "svag-lint lint",
-    "test": "svag-jest test"
+    "prepare": "husky",
+    "prettify": "svag-prettier prettify",
+    "start": "svag-ts start",
+    "test": "svag-jest test",
+    "types": "svag-ts types",
+    "watch": "svag-ts watch"
+  },
+  "dependencies": {
+    "@google-cloud/local-auth": "2.1.0",
+    "axios": "^1.6.8",
+    "dedent": "^1.5.3",
+    "dotenv": "^16.4.5",
+    "fast-glob": "^3.3.2",
+    "fluent-ffmpeg": "^2.1.2",
+    "form-data": "^4.0.0",
+    "formdata-node": "^6.0.3",
+    "googleapis": "^136.0.0",
+    "langs": "^2.0.0",
+    "lodash": "^4.17.21",
+    "node-fetch": "^2.7.0",
+    "puppeteer": "^22.8.0",
+    "readline-sync": "^1.4.10",
+    "source-map-support": "^0.5.21",
+    "svag-cli-utils": "^0.1.67",
+    "transliteration": "^2.3.5",
+    "zod": "^3.23.6"
   },
   "devDependencies": {
     "@types/fluent-ffmpeg": "^2.1.24",
@@ -61,24 +80,5 @@
     "tsc-alias": "^1.8.10",
     "typescript": "^5.4.5"
   },
-  "dependencies": {
-    "@google-cloud/local-auth": "2.1.0",
-    "axios": "^1.6.8",
-    "dedent": "^1.5.3",
-    "dotenv": "^16.4.5",
-    "fast-glob": "^3.3.2",
-    "fluent-ffmpeg": "^2.1.2",
-    "form-data": "^4.0.0",
-    "formdata-node": "^6.0.3",
-    "googleapis": "^136.0.0",
-    "langs": "^2.0.0",
-    "lodash": "^4.17.21",
-    "node-fetch": "^2.7.0",
-    "puppeteer": "^22.8.0",
-    "readline-sync": "^1.4.10",
-    "source-map-support": "^0.5.21",
-    "svag-cli-utils": "^0.1.67",
-    "transliteration": "^2.3.5",
-    "zod": "^3.23.6"
-  }
+  "type": "module"
 }
