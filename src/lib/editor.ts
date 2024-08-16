@@ -139,3 +139,146 @@ export const converWavToMp3 = async ({
     outputMp3Path,
   }
 }
+
+export const cutVideo = async ({
+  inputVideoPath,
+  outputVideoPath,
+  start,
+  end,
+  cwd,
+}: {
+  inputVideoPath: string
+  outputVideoPath: string
+  start: string
+  end: string
+  cwd: string
+}) => {
+  const normalizedInputVideoPath = path.resolve(cwd, inputVideoPath)
+  const normalizedOutputVideoPath = path.resolve(cwd, outputVideoPath)
+  const nativeCommand = `ffmpeg -i "${normalizedInputVideoPath}" -ss ${start} -to ${end} -c copy -y "${normalizedOutputVideoPath}"`
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+  return {
+    inputVideoPath: normalizedInputVideoPath,
+    outputVideoPath: normalizedOutputVideoPath,
+  }
+}
+
+// bad audio syncing
+// export const decutVideo = async ({
+//   inputVideoPath,
+//   outputVideoPath,
+//   times,
+//   cwd,
+// }: {
+//   inputVideoPath: string
+//   outputVideoPath: string
+//   times: Array<[string, string]> // [[00:05:24, 00:06:27], [00:10:51, 00:14:04]]
+//   cwd: string
+// }) => {
+//   const normalizedInputVideoPath = path.resolve(cwd, inputVideoPath)
+//   const normalizedOutputVideoPath = path.resolve(cwd, outputVideoPath)
+//   const inputExt = path.extname(normalizedInputVideoPath)
+//   const inputBase = path.basename(normalizedInputVideoPath, inputExt)
+//   const inputDir = path.dirname(normalizedInputVideoPath)
+//   const concatFilePath = path.resolve(inputDir, `${inputBase}.concat.txt`)
+
+//   // An array to store the paths of the video parts
+//   const partPaths = []
+
+//   // Handle the first segment before the first unwanted section
+//   let lastEndTime = '00:00:00'
+//   for (const [i, [start, end]] of times.entries()) {
+//     const partPath = path.resolve(inputDir, `${inputBase}.part${i + 1}${inputExt}`)
+
+//     // Cut each part of the video before the unwanted sections using smart seeking
+//     const cutCommand = `ffmpeg -ss ${lastEndTime} -i "${normalizedInputVideoPath}" -to ${start} -c copy -y "${partPath}"`
+//     await spawn({ command: cutCommand, cwd: process.cwd() })
+
+//     partPaths.push(partPath)
+//     lastEndTime = end // Update last end time to the current segment's end
+//   }
+
+//   // Handle the segment after the last unwanted section
+//   const lastPartPath = path.resolve(inputDir, `${inputBase}.part${times.length + 1}${inputExt}`)
+//   const cutLastPartCommand = `ffmpeg -ss ${lastEndTime} -i "${normalizedInputVideoPath}" -c copy -y "${lastPartPath}"`
+//   await spawn({ command: cutLastPartCommand, cwd: process.cwd() })
+//   partPaths.push(lastPartPath)
+
+//   // Write the paths of the parts to the concat list file
+//   const concatFileContent = partPaths.map((partPath) => `file '${partPath}'`).join('\n')
+//   await fs.writeFile(concatFilePath, concatFileContent)
+
+//   // Concatenate all the parts together using the concat demuxer
+//   const concatCommand = `ffmpeg -f concat -safe 0 -i "${concatFilePath}" -c copy -y "${normalizedOutputVideoPath}"`
+//   await spawn({ command: concatCommand, cwd: process.cwd() })
+
+//   // Clean up temporary files
+//   for (const partPath of partPaths) {
+//     await fs.unlink(partPath)
+//   }
+//   await fs.unlink(concatFilePath)
+
+//   return {
+//     inputVideoPath: normalizedInputVideoPath,
+//     outputVideoPath: normalizedOutputVideoPath,
+//   }
+// }
+
+export const decutVideo = async ({
+  inputVideoPath,
+  outputVideoPath,
+  times,
+  fast,
+  cwd,
+}: {
+  inputVideoPath: string
+  outputVideoPath: string
+  times: Array<[string, string]> // [[00:05:24, 00:06:27], [00:10:51, 00:14:04]]
+  fast?: boolean
+  cwd: string
+}) => {
+  const normalizedInputVideoPath = path.resolve(cwd, inputVideoPath)
+  const normalizedOutputVideoPath = path.resolve(cwd, outputVideoPath)
+
+  // Convert time strings to seconds
+  const convertToSeconds = (time: string) => {
+    const [hh, mm, ss] = time.split(':').map(Number)
+    return hh * 3_600 + mm * 60 + ss
+  }
+
+  // Create a filter for select and aselect based on the times array
+  const filterParts = times.map(([start, end]) => {
+    const startSec = convertToSeconds(start)
+    const endSec = convertToSeconds(end)
+    return `between(t,${startSec},${endSec})`
+  })
+
+  const command = (() => {
+    if (fast) {
+      // const selectFilter = `select='not(${filterParts.join('+')})', setpts=N/FRAME_RATE/TB`
+      // const fpsFilter = `fps=fps=30`
+      // const videoFilter = `${selectFilter},${fpsFilter}`
+      // const aselectFilter = `aselect='not(${filterParts.join('+')})', asetpts=N/SR/TB`
+      // return `ffmpeg -i "${normalizedInputVideoPath}" -vf "${videoFilter}" -af "${aselectFilter}" -c:v libx264 -preset ultrafast -crf 18 -c:a aac -y "${normalizedOutputVideoPath}"`
+      const selectFilter = `select='not(${filterParts.join('+')})', setpts=N/FRAME_RATE/TB`
+      const fpsFilter = `fps=fps=10`
+      const videoFilter = `${selectFilter},${fpsFilter}`
+      const aselectFilter = `aselect='not(${filterParts.join('+')})', asetpts=N/SR/TB`
+      return `ffmpeg -i "${normalizedInputVideoPath}" -vf "${videoFilter}" -af "${aselectFilter}" -c:v libx264 -preset ultrafast -crf 28 -c:a aac -y "${normalizedOutputVideoPath}"`
+      // return `ffmpeg -i "${normalizedInputVideoPath}" -vf "${videoFilter}" -af "${aselectFilter}" -c:v libx264 -preset ultrafast -crf 45 -c:a aac -y "${normalizedOutputVideoPath}"`
+    } else {
+      // const selectFilter = `select='not(${filterParts.join('+')})', setpts=N/FRAME_RATE/TB`
+      // const aselectFilter = `aselect='not(${filterParts.join('+')})', asetpts=N/SR/TB`
+      // return `ffmpeg -i "${normalizedInputVideoPath}" -vf "${selectFilter}" -af "${aselectFilter}" -c:v libx264 -preset slow -crf 24 -c:a aac -b:a 128k -y "${normalizedOutputVideoPath}"`
+      const selectFilter = `select='not(${filterParts.join('+')})', setpts=N/FRAME_RATE/TB`
+      const aselectFilter = `aselect='not(${filterParts.join('+')})', asetpts=N/SR/TB`
+      return `ffmpeg -i "${normalizedInputVideoPath}" -vf "${selectFilter}" -af "${aselectFilter}" -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 128k -y "${normalizedOutputVideoPath}"`
+    }
+  })()
+  await spawn({ command, cwd: process.cwd() })
+
+  return {
+    inputVideoPath: normalizedInputVideoPath,
+    outputVideoPath: normalizedOutputVideoPath,
+  }
+}

@@ -2,7 +2,7 @@
 import 'source-map-support/register.js'
 import { auphonic } from '@/lib/auphonic.js'
 import { getConfig } from '@/lib/config.js'
-import { applyAudiosToVideo, converWavToMp3, extractAudio } from '@/lib/editor.js'
+import { applyAudiosToVideo, converWavToMp3, cutVideo, decutVideo, extractAudio } from '@/lib/editor.js'
 import { elevenlabs } from '@/lib/elevenlabs.js'
 import { removeVideosAndAudios } from '@/lib/fs.js'
 import { googleDrive } from '@/lib/googledrive.js'
@@ -14,6 +14,7 @@ import type { LangProcessed } from '@/lib/utils.js'
 import { fromRawLang, zLang, zLangProcessed } from '@/lib/utils.js'
 import { youtube } from '@/lib/youtube.js'
 import dedent from 'dedent'
+import _ from 'lodash'
 import path from 'path'
 import readlineSync from 'readline-sync'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
@@ -38,6 +39,64 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     case 'config':
     case 'c': {
       log.gray(config)
+      break
+    }
+    case 'cut-video':
+    case 'cut': {
+      const input = z
+        .object({
+          inputVideoPath: z.string().min(1),
+          outputVideoPath: z.string().min(1),
+          start: z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+          end: z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+          // fast: z.boolean().optional().default(false),
+        })
+        .parse({
+          inputVideoPath: args[0],
+          outputVideoPath: args[1],
+          start: args[2],
+          end: args[3],
+          // fast: getFlagAsBoolean({
+          //   flags,
+          //   keys: ['fast', 'f'],
+          //   coalesce: false,
+          // }),
+        })
+      const { inputVideoPath, outputVideoPath, start, end } = input
+      const result = await cutVideo({ inputVideoPath, outputVideoPath, start, end, cwd })
+      log.green(result)
+      break
+    }
+    case 'decut-video':
+    case 'decut': {
+      const timesArgs = args.slice(2) // 00:05:24 00:06:27 00:10:51 00:14:04
+      const input = z
+        .object({
+          inputVideoPath: z.string().min(1),
+          outputVideoPath: z.string().min(1),
+          times: z
+            .array(
+              z.tuple([
+                z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+                z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+              ])
+            )
+            .min(1),
+          fast: z.boolean().optional().default(false),
+        })
+        .parse({
+          inputVideoPath: args[0],
+          outputVideoPath: args[1],
+          times: _.chunk(timesArgs, 2),
+          fast: getFlagAsBoolean({
+            flags,
+            keys: ['fast', 'f'],
+            coalesce: false,
+          }),
+        })
+      const { inputVideoPath, outputVideoPath, times, fast } = input
+      const result = await decutVideo({ cwd, inputVideoPath, outputVideoPath, times, fast })
+      log.green(result)
       break
     }
     case 'download-from-google-drive':
@@ -961,6 +1020,8 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     case 'h': {
       log.black(dedent`Commands:
         c | config
+
+        cut | cut-video <inputVideoPath> <outputVideoPath> <start> <end>
 
         dg | download-from-google-drive ?--file-id(-i) <fileId> ?--file-path(-p) <filePath> ?--file-url(-u) <fileUrl>
         dgs | download-from-google-drive-by-search <search> --dir <dirId> 
