@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/prefer-type-error */
 import type { Config } from '@/lib/config.js'
 import { parseFileName } from '@/lib/meta.js'
 import type { Lang } from '@/lib/utils.js'
@@ -281,4 +282,86 @@ export const decutVideo = async ({
     inputVideoPath: normalizedInputVideoPath,
     outputVideoPath: normalizedOutputVideoPath,
   }
+}
+
+export const getAudioDuration = async ({ audioPath }: { audioPath: string }) => {
+  const result = await spawn({
+    command: `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`,
+    cwd: process.cwd(),
+  })
+  const duration = parseFloat(result) // in seconds
+  if (isNaN(duration)) {
+    throw new Error('Invalid duration')
+  }
+  return duration
+}
+
+const addSuffixToFilePath = ({ filePath, suffix }: { filePath: string; suffix: string }) => {
+  const ext = path.extname(filePath)
+  const base = path.basename(filePath, ext)
+  return `${base}.${suffix}${ext}`
+}
+
+export const stretchAudioDuration = async ({
+  duration,
+  audioPath,
+  verbose,
+}: {
+  duration: number // in seconds
+  audioPath: string
+  verbose?: boolean
+}) => {
+  const srcDuration = duration
+  const distDuration = await getAudioDuration({ audioPath })
+  verbose && log.normal('Staretching audio duration', { distDuration, srcDuration, audioPath })
+  const audioPathBak = addSuffixToFilePath({ filePath: audioPath, suffix: 'bak' })
+  const copyCommand = `cp "${audioPath}" "${audioPathBak}"`
+  await spawn({ command: copyCommand, cwd: process.cwd() })
+  const audioPathTemp = addSuffixToFilePath({ filePath: audioPath, suffix: 'temp' })
+  const diffDuration = srcDuration - distDuration
+  if (diffDuration === 0) {
+    verbose && log.normal('No need to stretch audio', { duration, audioPath })
+    return {
+      audioPath,
+      duration,
+    }
+  }
+  const srcDurationWithExtra = srcDuration + 0.001
+  const atempo = distDuration / srcDurationWithExtra
+  const atempoCommand = `ffmpeg -i "${audioPath}" -filter:a "atempo=${atempo}" -y "${audioPathTemp}"`
+  verbose && log.normal('Atemping', { duration, audioPath, atempo }, atempoCommand)
+  await spawn({ command: atempoCommand, cwd: process.cwd() })
+
+  // replace original with temp
+  const replaceCommand = `mv "${audioPathTemp}" "${audioPath}"`
+  await spawn({ command: replaceCommand, cwd: process.cwd() })
+
+  const cutCommand = `ffmpeg -i "${audioPath}" -ss 0 -to ${srcDuration} -y "${audioPathTemp}"`
+  verbose && log.normal('Cutting audio', { duration, audioPath })
+  await spawn({ command: cutCommand, cwd: process.cwd() })
+
+  // replace original with temp
+  const replaceCommand2 = `mv "${audioPathTemp}" "${audioPath}"`
+  await spawn({ command: replaceCommand2, cwd: process.cwd() })
+
+  verbose && log.normal('Staretched audio duration', { duration, audioPath })
+  return {
+    audioPath,
+    duration,
+  }
+}
+
+export const syncAudiosDuration = async ({
+  distAudioPath,
+  srcAudioPath,
+  verbose,
+}: {
+  distAudioPath: string
+  srcAudioPath: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Syncing audios duration', { srcAudioPath, distAudioPath })
+  const srcDuration = await getAudioDuration({ audioPath: srcAudioPath })
+  const result = await stretchAudioDuration({ duration: srcDuration, audioPath: distAudioPath, verbose })
+  return result
 }

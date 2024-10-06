@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import 'source-map-support/register.js'
 import { auphonic } from '@/lib/auphonic.js'
+import { ttsByAzureai } from '@/lib/azureai.js'
 import { getConfig } from '@/lib/config.js'
 import { applyAudiosToVideo, converWavToMp3, cutVideo, decutVideo, extractAudio } from '@/lib/editor.js'
 import { elevenlabs } from '@/lib/elevenlabs.js'
@@ -10,6 +11,7 @@ import { kinescope } from '@/lib/kinescope.js'
 import { loom } from '@/lib/loom.js'
 import { getMetaByFilePath, parseFileName } from '@/lib/meta.js'
 import { rask } from '@/lib/rask.js'
+import { extractSrtByRevai } from '@/lib/revai.js'
 import type { LangProcessed } from '@/lib/utils.js'
 import { fromRawLang, zLang, zLangProcessed } from '@/lib/utils.js'
 import { youtube } from '@/lib/youtube.js'
@@ -21,6 +23,7 @@ import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-u
 import z from 'zod'
 
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
+  const startedAt = new Date()
   const verbose = getFlagAsBoolean({
     flags,
     keys: ['verbose'],
@@ -289,7 +292,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const langsRaw = langsString?.split(',')
       const { langs } = z.object({ langs: z.array(zLang) }).parse({ langs: langsRaw })
 
-      const result = applyAudiosToVideo({ inputVideoPath, config, langs })
+      const result = await applyAudiosToVideo({ inputVideoPath, config, langs })
       log.green(result)
       break
     }
@@ -762,6 +765,61 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
 
+    case 'extract-srt':
+    case 'es': {
+      const { lang, filePath, translatedLangs } = z
+        .object({ lang: zLang.optional(), filePath: z.string().min(1), translatedLangs: z.array(zLangProcessed) })
+        .parse({
+          lang: getFlagAsString({
+            flags,
+            keys: ['lang', 'l'],
+            coalesce: undefined,
+          }),
+          filePath: args[0],
+          translatedLangs:
+            getFlagAsString({
+              flags,
+              keys: ['translated-langs', 'tl'],
+              coalesce: undefined,
+            })?.split(',') || [],
+        })
+      const { srtFilePath } = await extractSrtByRevai({ config, lang, verbose, filePath, translatedLangs, force })
+      log.green(srtFilePath)
+      break
+    }
+
+    case 'tts': {
+      const { lang, srtPath, srcAudioPath } = z
+        .object({ lang: zLang.optional(), srtPath: z.string().min(1), srcAudioPath: z.string().min(1) })
+        .parse({
+          lang: getFlagAsString({
+            flags,
+            keys: ['lang', 'l'],
+            coalesce: undefined,
+          }),
+          srtPath: getFlagAsString({
+            flags,
+            keys: ['srt', 's'],
+            coalesce: undefined,
+          }),
+          srcAudioPath: getFlagAsString({
+            flags,
+            keys: ['src-audio', 'a'],
+            coalesce: undefined,
+          }),
+        })
+      const { audioFilePath } = await ttsByAzureai({
+        force,
+        config,
+        lang,
+        verbose,
+        srcAudioPath,
+        srtPath,
+      })
+      log.green(audioFilePath)
+      break
+    }
+
     case 'boom': {
       const steps = [
         'loom',
@@ -1013,7 +1071,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
     case 'clear': {
       const dirPath = args[0] || config.contentDir
-      const result = removeVideosAndAudios({ dirPath })
+      const result = await removeVideosAndAudios({ dirPath })
       log.green(result)
       break
     }
@@ -1069,4 +1127,17 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
   }
+
+  const finishedAt = new Date()
+  const executionDurationMs = finishedAt.getTime() - startedAt.getTime()
+  const executionDurationSeconds = executionDurationMs / 1_000
+  const executionDurationMinutes = executionDurationSeconds / 60
+  const fullCommandString = [command, ...argr].join(' ')
+  log.normal(
+    `Execution duration`,
+    fullCommandString,
+    `${executionDurationMs}ms`,
+    `${executionDurationSeconds}s`,
+    `${executionDurationMinutes}m`
+  )
 })

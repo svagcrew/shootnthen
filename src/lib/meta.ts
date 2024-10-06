@@ -8,6 +8,11 @@ import z from 'zod'
 
 export const zMeta = z.object({
   title: z.string().optional(),
+  revai: z
+    .object({
+      lastTranscriptJobId: z.string().optional(),
+    })
+    .default({}),
   loom: z
     .object({
       videos: z
@@ -116,6 +121,7 @@ export type Meta = z.infer<typeof zMeta>
 const marksAllowed = [...langsProcessedAllowed, ...langsRawAllowed] as string[]
 
 export const parseFileName = (fileName: string) => {
+  const dirname = path.dirname(fileName)
   const basename = path.basename(fileName)
   const parts = basename.split('.')
   const ext = parts.pop()
@@ -128,7 +134,7 @@ export const parseFileName = (fileName: string) => {
   const notLangMarks = marks.filter((part) => !allLangs.includes(part as any))
   const name = notMarks.join('.')
 
-  return { name, langsProcessed, langsRaw, langs, marks, notLangMarks, ext, langSingle, basename }
+  return { name, langsProcessed, langsRaw, langs, marks, notLangMarks, ext, langSingle, basename, dirname }
 }
 
 export const getMetaFilePath = ({ filePath, config }: { filePath: string; config: Config }) => {

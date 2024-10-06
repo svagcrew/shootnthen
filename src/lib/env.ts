@@ -31,6 +31,9 @@ const zEnv = z.object({
   AUPHONIC_EMAIL: z.string(),
   AUPHONIC_PASSWORD: z.string(),
   KINESCOPE_API_KEY: z.string(),
+  REVAI_ACCESS_TOKEN: z.string(),
+  AZURE_AI_KEY: z.string(),
+  AZURE_AI_REGION: z.string(),
 })
 
 type Env = z.infer<typeof zEnv>
