@@ -295,13 +295,9 @@ export const ttsSimpleByAzureai = async ({
 
   verbose && log.normal(`Generated ${ttsTasks.length} tts tasks`)
 
-  console.dir(ttsTasks, { depth: null })
-
   const promises = ttsTasks.map((ttsTask, i) => async () => {
-    console.log(123123123, i)
     const outputAudioPath = addSuffixToFilePath({ filePath: distAudioPath, suffix: `temp-${i}` })
     await executeTtsTask({ ttsTask, outputAudioPath, verbose })
-    console.log(234234234, i)
     return outputAudioPath
   })
   // const ttsResultsPaths = await Promise.all(promises.map(async (promise) => await promise()))
