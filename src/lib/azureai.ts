@@ -1,6 +1,12 @@
 /* eslint-disable radix */
 import type { Config } from '@/lib/config.js'
-import { concatAudios, stretchAudioDuration, syncAudiosDuration } from '@/lib/editor.js'
+import {
+  concatAudios,
+  createSilentAudio,
+  getAudioDuration,
+  normalizeAudioDuration,
+  syncAudiosDuration,
+} from '@/lib/editor.js'
 import { getEnv } from '@/lib/env.js'
 import { parseFileName } from '@/lib/meta.js'
 import { addSuffixToFilePath } from '@/lib/utils.js'
@@ -9,6 +15,192 @@ import sdk from 'microsoft-cognitiveservices-speech-sdk'
 import path from 'path'
 import SrtParser from 'srt-parser-2'
 import { isFileExistsSync, log } from 'svag-cli-utils'
+
+type Subtitle = {
+  id: string
+  startTime: string
+  startSeconds: number
+  endTime: string
+  endSeconds: number
+  text: string
+}
+
+type TtsTask = {
+  ssml: string
+  durationMs: number
+  type: 'speach' | 'gap'
+  voiceName: string
+}
+
+// Helper function to convert time string to milliseconds
+const timeStringToMilliseconds = (timeString: string): number => {
+  // Format HH:MM:SS,mmm
+  const [hours, minutes, rest] = timeString.split(':')
+  const [seconds, milliseconds] = rest.replace(',', '.').split('.')
+  const totalMs =
+    parseInt(hours) * 3_600_000 + parseInt(minutes) * 60_000 + parseInt(seconds) * 1_000 + parseInt(milliseconds)
+  return totalMs
+}
+
+// Helper function to escape XML special characters
+const escapeXml = (unsafe: string): string => {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+const subtitlesToTtsTasks = ({
+  desiredTotalDurationMs,
+  subtitles,
+  voiceName,
+  lang,
+}: {
+  desiredTotalDurationMs: number
+  subtitles: Subtitle[]
+  voiceName: string
+  lang: string
+}) => {
+  const ttsTasks: TtsTask[] = []
+
+  let currentTotalDurationMs = 0
+  let prevEndMs = 0
+
+  for (const subtitle of subtitles) {
+    let ssml = ''
+    ssml += `<?xml version="1.0" encoding="UTF-8"?>\n`
+    ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
+    ssml += `<voice name="${voiceName}">\n`
+
+    const text = subtitle.text
+
+    const startTime = subtitle.startTime // in format HH:MM:SS,mmm
+    const endTime = subtitle.endTime
+
+    // Convert startTime and endTime to milliseconds
+    const startMs = timeStringToMilliseconds(startTime)
+    const endMs = timeStringToMilliseconds(endTime)
+
+    // Calculate gap from previous end to current start
+    const gapMs = startMs - prevEndMs
+
+    // Calculate the desired duration for this subtitle
+    const desiredDurationMs = endMs - startMs
+
+    if (gapMs > 0) {
+      currentTotalDurationMs += gapMs
+      ttsTasks.push({
+        ssml: `<break time="${gapMs}ms"/>`,
+        durationMs: gapMs,
+        type: 'gap',
+        voiceName,
+      })
+    }
+
+    ssml += `<prosody duration="${desiredDurationMs}ms">${escapeXml(text)}</prosody>\n`
+    ssml += `</voice>\n`
+    ssml += `</speak>`
+
+    prevEndMs = endMs
+    currentTotalDurationMs += desiredDurationMs
+    ttsTasks.push({
+      ssml,
+      durationMs: desiredDurationMs,
+      type: 'speach',
+      voiceName,
+    })
+  }
+
+  const remainingDurationMs = desiredTotalDurationMs - currentTotalDurationMs
+  if (remainingDurationMs > 0) {
+    ttsTasks.push({
+      ssml: `<break time="${remainingDurationMs}ms"/>`,
+      durationMs: remainingDurationMs,
+      type: 'gap',
+      voiceName,
+    })
+  }
+  return ttsTasks
+}
+
+const executeTtsTask = async ({
+  ttsTask,
+  outputAudioPath,
+  verbose,
+}: {
+  ttsTask: TtsTask
+  outputAudioPath: string
+  verbose?: boolean
+}) => {
+  if (ttsTask.type === 'gap') {
+    verbose && log.normal(`Creating silent audio for gap (duration: ${ttsTask.durationMs}ms)`)
+    await createSilentAudio({
+      durationMs: ttsTask.durationMs,
+      outputAudioPath,
+      verbose,
+    })
+    verbose && log.normal(`Created silent audio for gap`)
+    return ttsTask
+  }
+
+  // Azure Speech SDK credentials
+  const subscriptionKey = getEnv('AZURE_AI_KEY')
+  const serviceRegion = getEnv('AZURE_AI_REGION')
+  // Initialize the Azure Speech SDK speech config
+  const speechConfig = sdk.SpeechConfig.fromSubscription(subscriptionKey, serviceRegion)
+  speechConfig.speechSynthesisOutputFormat = sdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
+  speechConfig.speechSynthesisVoiceName = ttsTask.voiceName
+
+  let tryIndex = 0
+  // eslint-disable-next-line no-unreachable-loop
+  while (tryIndex < 10) {
+    try {
+      // Create the Speech Synthesizer
+      const audioConfig = sdk.AudioConfig.fromAudioFileOutput(outputAudioPath)
+      const synthesizer = new sdk.SpeechSynthesizer(speechConfig, audioConfig)
+
+      // Synthesize the SSML to audio file (async)
+      verbose && log.normal(`Synthesizing SSML (duration: ${ttsTask.durationMs}ms)`, ttsTask.ssml)
+      await new Promise<void>((resolve, reject) => {
+        synthesizer.speakSsmlAsync(
+          ttsTask.ssml,
+          (result) => {
+            if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
+              resolve()
+            } else {
+              reject(new Error(`Speech synthesis failed: ${result.errorDetails}`))
+            }
+            synthesizer.close()
+          },
+          (err) => {
+            synthesizer.close()
+            reject(err)
+          }
+        )
+      })
+      verbose && log.normal(`Synthesized SSML chunk`)
+      await normalizeAudioDuration({
+        audioPath: outputAudioPath,
+        durationMs: ttsTask.durationMs,
+        verbose,
+      })
+      return ttsTask
+    } catch (error: any) {
+      if (
+        error.messages ===
+        'Speech synthesis failed: Status(StatusCode="ResourceExhausted", Detail="No free synthesizer") websocket error code: 1013'
+      ) {
+        verbose && log.normal('Speech synthesis failed: No free synthesizer', { tryIndex })
+        tryIndex++
+        await new Promise((resolve) => setTimeout(resolve, 10_000))
+      }
+      throw error
+    }
+  }
+  return ttsTask
+}
 
 export const ttsByAzureai = async ({
   config,
@@ -56,7 +248,7 @@ export const ttsByAzureai = async ({
   return { audioFilePath: distAudioPath }
 }
 
-const promisesAllSequential = async (promises: Array<() => Promise<any>>) => {
+const Stratched = async <T>(promises: Array<() => Promise<T>>): Promise<T[]> => {
   const results = []
   for (const promise of promises) {
     results.push(await promise())
@@ -79,33 +271,7 @@ export const ttsSimpleByAzureai = async ({
   lang: string
   verbose?: boolean
 }) => {
-  // Azure Speech SDK credentials
-  const subscriptionKey = getEnv('AZURE_AI_KEY')
-  const serviceRegion = getEnv('AZURE_AI_REGION')
-
-  // Helper function to convert time string to milliseconds
-  const timeStringToMilliseconds = (timeString: string): number => {
-    // Format HH:MM:SS,mmm
-    const [hours, minutes, rest] = timeString.split(':')
-    const [seconds, milliseconds] = rest.replace(',', '.').split('.')
-    const totalMs =
-      parseInt(hours) * 3_600_000 + parseInt(minutes) * 60_000 + parseInt(seconds) * 1_000 + parseInt(milliseconds)
-    return totalMs
-  }
-
-  // Helper function to escape XML special characters
-  const escapeXml = (unsafe: string): string => {
-    return unsafe
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;')
-  }
-
-  // Initialize the Azure Speech SDK speech config
-  const speechConfig = sdk.SpeechConfig.fromSubscription(subscriptionKey, serviceRegion)
-  speechConfig.speechSynthesisOutputFormat = sdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
+  const desiredTotalDurationMs = await getAudioDuration({ audioPath: srcAudioPath })
 
   // Map language codes to voice names
   const voiceMap: { [key: string]: string } = {
@@ -113,135 +279,37 @@ export const ttsSimpleByAzureai = async ({
     // ru: 'ru-RU-SvetlanaNeural',
     // Add more mappings as needed
   }
-
   const voiceName = voiceMap[lang] || 'en-US-AriaNeural' // default voice if language not found
-  speechConfig.speechSynthesisVoiceName = voiceName
 
   // Read and parse the SRT file
   const srtContent = await fs.readFile(srtPath, 'utf8')
   const parser = new SrtParser()
   const subtitles = parser.fromSrt(srtContent) // Parse SRT
 
-  // Build SSML chunks
-  const ssmlChunks: Array<{ ssml: string; durationMs: number }> = []
-  let ssml = ''
-  let cumulativeDurationMs = 0
-  let prevEndMs = 0
-
-  // Start the first SSML chunk
-  ssml += `<?xml version="1.0" encoding="UTF-8"?>\n`
-  ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
-  ssml += `<voice name="${voiceName}">\n`
-
-  for (const subtitle of subtitles) {
-    const text = subtitle.text
-
-    const startTime = subtitle.startTime // in format HH:MM:SS,mmm
-    const endTime = subtitle.endTime
-
-    // Convert startTime and endTime to milliseconds
-    const startMs = timeStringToMilliseconds(startTime)
-    const endMs = timeStringToMilliseconds(endTime)
-
-    // Calculate gap from previous end to current start
-    const gapMs = startMs - prevEndMs
-
-    // Calculate the desired duration for this subtitle
-    const desiredDurationMs = endMs - startMs
-
-    const chunkDurationLimitSec = 15
-    const chunkDurationLimitMs = chunkDurationLimitSec * 1_000
-    if (cumulativeDurationMs + desiredDurationMs + gapMs > chunkDurationLimitMs && cumulativeDurationMs) {
-      // Close the current SSML chunk
-      ssml += `</voice>\n`
-      ssml += `</speak>`
-      // Add the completed SSML chunk to the array
-      ssmlChunks.push({ ssml, durationMs: cumulativeDurationMs })
-
-      // Start a new SSML chunk
-      ssml = `<?xml version="1.0" encoding="UTF-8"?>\n`
-      ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
-      ssml += `<voice name="${voiceName}">\n`
-
-      // Reset cumulative duration
-      cumulativeDurationMs = 0
-      prevEndMs = startMs
-    }
-
-    if (gapMs > 0) {
-      ssml += `<break time="${gapMs}ms"/>\n`
-    }
-
-    // Add the text with specified duration using prosody
-    ssml += `<prosody duration="${desiredDurationMs}ms">${escapeXml(text)}</prosody>\n`
-
-    cumulativeDurationMs += desiredDurationMs + gapMs
-    prevEndMs = endMs
-  }
-
-  // After the loop, close the last SSML chunk
-  ssml += `</voice>\n`
-  ssml += `</speak>`
-  ssmlChunks.push({ ssml, durationMs: cumulativeDurationMs })
-
-  verbose && log.normal(`Generated ${ssmlChunks.length} SSML chunks`)
-
-  const promises = ssmlChunks.map((ssmlChunk, i) => async () => {
-    let tryIndex = 0
-    while (tryIndex < 10) {
-      try {
-        // Create the Speech Synthesizer
-        const distAudioTempPath = addSuffixToFilePath({ filePath: distAudioPath, suffix: `temp-${i}` })
-        const audioConfig = sdk.AudioConfig.fromAudioFileOutput(distAudioTempPath)
-        const synthesizer = new sdk.SpeechSynthesizer(speechConfig, audioConfig)
-
-        // Synthesize the SSML to audio file (async)
-        verbose && log.normal(`Synthesizing SSML chunk ${i + 1} (duration: ${ssmlChunk.durationMs}ms)`, ssmlChunk.ssml)
-        await new Promise<void>((resolve, reject) => {
-          synthesizer.speakSsmlAsync(
-            ssmlChunk.ssml,
-            (result) => {
-              if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
-                resolve()
-              } else {
-                reject(new Error(`Speech synthesis failed: ${result.errorDetails}`))
-              }
-              synthesizer.close()
-            },
-            (err) => {
-              synthesizer.close()
-              reject(err)
-            }
-          )
-        })
-        verbose && log.normal(`Synthesized SSML chunk ${i + 1}`)
-        await stretchAudioDuration({
-          audioPath: distAudioTempPath,
-          // in seconds
-          duration: ssmlChunk.durationMs / 1_000,
-          verbose,
-        })
-      } catch (error: any) {
-        if (
-          error.messages ===
-          'Speech synthesis failed: Status(StatusCode="ResourceExhausted", Detail="No free synthesizer") websocket error code: 1013'
-        ) {
-          verbose && log.normal('Speech synthesis failed: No free synthesizer', { tryIndex })
-          tryIndex++
-          await new Promise((resolve) => setTimeout(resolve, 10_000))
-        }
-        throw error
-      }
-    }
+  const ttsTasks = subtitlesToTtsTasks({
+    desiredTotalDurationMs,
+    subtitles,
+    voiceName,
+    lang,
   })
-  await Promise.all(promises.map(async (promise) => await promise()))
-  // await promisesAllSequential(promises)
-  const distAudioTempPaths = ssmlChunks.map((_, i) =>
-    addSuffixToFilePath({ filePath: distAudioPath, suffix: `temp-${i}` })
-  )
-  await concatAudios({ audioPaths: distAudioTempPaths, outputAudioPath: distAudioPath, verbose })
+
+  verbose && log.normal(`Generated ${ttsTasks.length} tts tasks`)
+
+  console.dir(ttsTasks, { depth: null })
+
+  const promises = ttsTasks.map((ttsTask, i) => async () => {
+    console.log(123123123, i)
+    const outputAudioPath = addSuffixToFilePath({ filePath: distAudioPath, suffix: `temp-${i}` })
+    await executeTtsTask({ ttsTask, outputAudioPath, verbose })
+    console.log(234234234, i)
+    return outputAudioPath
+  })
+  // const ttsResultsPaths = await Promise.all(promises.map(async (promise) => await promise()))
+  const ttsTempResultsPaths = await Stratched(promises)
+
+  await concatAudios({ audioPaths: ttsTempResultsPaths, outputAudioPath: distAudioPath, verbose })
   // delete temp files
-  await Promise.all(distAudioTempPaths.map(async (distAudioTempPath) => await fs.unlink(distAudioTempPath)))
+  await Promise.all(ttsTempResultsPaths.map(async (ttsTempResultPath) => await fs.unlink(ttsTempResultPath)))
   await syncAudiosDuration({
     srcAudioPath,
     distAudioPath,

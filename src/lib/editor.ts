@@ -4,6 +4,7 @@ import { parseFileName } from '@/lib/meta.js'
 import type { Lang } from '@/lib/utils.js'
 import { addSuffixToFilePath, fromRawLang } from '@/lib/utils.js'
 import ffmpeg from 'fluent-ffmpeg'
+import { promises as fs } from 'fs'
 import langCodesLib from 'langs'
 import path from 'path'
 import { isFileExistsSync, log, spawn } from 'svag-cli-utils'
@@ -293,55 +294,152 @@ export const getAudioDuration = async ({ audioPath }: { audioPath: string }) => 
   if (isNaN(duration)) {
     throw new Error('Invalid duration')
   }
-  return duration
+  return Math.floor(duration * 1_000)
 }
 
 export const stretchAudioDuration = async ({
-  duration,
+  durationMs,
   audioPath,
   verbose,
 }: {
-  duration: number // in seconds
+  durationMs: number // in milliseconds
   audioPath: string
   verbose?: boolean
 }) => {
-  const srcDuration = duration
-  const distDuration = await getAudioDuration({ audioPath })
-  verbose && log.normal('Staretching audio duration', { distDuration, srcDuration, audioPath })
+  const srcDurationS = durationMs / 1_000
+  const distDurationMs = await getAudioDuration({ audioPath })
+  const distDurationS = distDurationMs / 1_000
+  verbose &&
+    log.normal('Staretching audio duration', { distDuration: distDurationS, srcDuration: srcDurationS, audioPath })
   const audioPathBak = addSuffixToFilePath({ filePath: audioPath, suffix: 'bak' })
   const copyCommand = `cp "${audioPath}" "${audioPathBak}"`
   await spawn({ command: copyCommand, cwd: process.cwd() })
   const audioPathTemp = addSuffixToFilePath({ filePath: audioPath, suffix: 'temp' })
-  const diffDuration = srcDuration - distDuration
+  const diffDuration = srcDurationS - distDurationS
   if (diffDuration === 0) {
-    verbose && log.normal('No need to stretch audio', { duration, audioPath })
+    verbose && log.normal('No need to stretch audio', { durationMs, audioPath })
     return {
       audioPath,
-      duration,
+      durationMs,
     }
   }
-  const srcDurationWithExtra = srcDuration + 0.001
-  const atempo = distDuration / srcDurationWithExtra
+  const srcDurationWithExtra = srcDurationS + 0.001
+  const atempo = distDurationS / srcDurationWithExtra
   const atempoCommand = `ffmpeg -i "${audioPath}" -filter:a "atempo=${atempo}" -y "${audioPathTemp}"`
-  verbose && log.normal('Atemping', { duration, audioPath, atempo }, atempoCommand)
+  verbose && log.normal('Atemping', { durationMs, audioPath, atempo }, atempoCommand)
   await spawn({ command: atempoCommand, cwd: process.cwd() })
 
   // replace original with temp
   const replaceCommand = `mv "${audioPathTemp}" "${audioPath}"`
   await spawn({ command: replaceCommand, cwd: process.cwd() })
 
-  const cutCommand = `ffmpeg -i "${audioPath}" -ss 0 -to ${srcDuration} -y "${audioPathTemp}"`
-  verbose && log.normal('Cutting audio', { duration, audioPath })
+  const cutCommand = `ffmpeg -i "${audioPath}" -ss 0 -to ${srcDurationS} -y "${audioPathTemp}"`
+  verbose && log.normal('Cutting audio', { durationMs, audioPath })
   await spawn({ command: cutCommand, cwd: process.cwd() })
 
   // replace original with temp
   const replaceCommand2 = `mv "${audioPathTemp}" "${audioPath}"`
   await spawn({ command: replaceCommand2, cwd: process.cwd() })
 
-  verbose && log.normal('Staretched audio duration', { duration, audioPath })
+  await fs.unlink(audioPathBak)
+
+  verbose && log.normal('Stratched audio duration', { durationMs, audioPath })
   return {
     audioPath,
-    duration,
+    durationMs,
+  }
+}
+
+// add silen
+export const addSilenceToAudio = async ({
+  silenceDurationMs,
+  audioPath,
+  policy,
+  verbose,
+}: {
+  silenceDurationMs: number // in milliseconds
+  audioPath: string
+  policy: 'before' | 'after'
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Adding silence to audio', { silenceDurationMs, audioPath, policy })
+  const audioBakPath = addSuffixToFilePath({ filePath: audioPath, suffix: 'bak' })
+  const audioTempPath = addSuffixToFilePath({ filePath: audioPath, suffix: 'temp' })
+  const copyCommand = `cp "${audioPath}" "${audioBakPath}"`
+  await spawn({ command: copyCommand, cwd: process.cwd() })
+  const silenceAudioPath = addSuffixToFilePath({ filePath: audioPath, suffix: 'silence' })
+  const silenceAudio = await createSilentAudio({ durationMs: silenceDurationMs, outputAudioPath: silenceAudioPath })
+  if (policy === 'before') {
+    await concatAudios({ audioPaths: [silenceAudio.outputAudioPath, audioPath], outputAudioPath: audioTempPath })
+  } else if (policy === 'after') {
+    await concatAudios({ audioPaths: [audioPath, silenceAudio.outputAudioPath], outputAudioPath: audioTempPath })
+  } else {
+    throw new Error('Invalid policy')
+  }
+  const replaceCommand = `mv "${audioTempPath}" "${audioPath}"`
+  await spawn({ command: replaceCommand, cwd: process.cwd() })
+  await fs.unlink(silenceAudio.outputAudioPath)
+  await fs.unlink(audioBakPath)
+  verbose && log.normal('Added silence to audio', { silenceDurationMs, audioPath, policy })
+  return {
+    silenceDurationMs,
+    audioPath,
+    policy,
+  }
+}
+
+export const createSilentAudio = async ({
+  durationMs,
+  outputAudioPath,
+  verbose,
+}: {
+  durationMs: number // in milliseconds
+  outputAudioPath: string
+  verbose?: boolean
+}) => {
+  const durationS = durationMs / 1_000
+  verbose && log.normal('Creating silent audio', { durationMs, outputAudioPath })
+  const nativeCommand = `ffmpeg -f lavfi -i anullsrc=r=44100:cl=stereo -t ${durationS} -y "${outputAudioPath}"`
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+  verbose && log.normal('Created silent audio', { durationMs, outputAudioPath })
+  return {
+    durationMs,
+    outputAudioPath,
+  }
+}
+
+export const normalizeAudioDuration = async ({
+  durationMs,
+  audioPath,
+  verbose,
+}: {
+  durationMs: number // in seconds
+  audioPath: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Normalizing audio duration', { durationMs, audioPath })
+  const srcDurationMs = durationMs
+  const srcDurationS = durationMs / 1_000
+  const distDurationMs = await getAudioDuration({ audioPath })
+  const distDurationS = distDurationMs / 1_000
+  if (srcDurationS < distDurationS) {
+    const result = await stretchAudioDuration({ durationMs: srcDurationMs, audioPath, verbose })
+    return {
+      audioPath: result.audioPath,
+      durationMs: result.durationMs,
+    }
+  } else {
+    const silenceDurationMs = srcDurationMs - distDurationMs
+    const result = await addSilenceToAudio({
+      silenceDurationMs,
+      audioPath,
+      policy: 'after',
+      verbose,
+    })
+    return {
+      audioPath: result.audioPath,
+      durationMs: result.silenceDurationMs + distDurationMs,
+    }
   }
 }
 
@@ -355,8 +453,8 @@ export const syncAudiosDuration = async ({
   verbose?: boolean
 }) => {
   verbose && log.normal('Syncing audios duration', { srcAudioPath, distAudioPath })
-  const srcDuration = await getAudioDuration({ audioPath: srcAudioPath })
-  const result = await stretchAudioDuration({ duration: srcDuration, audioPath: distAudioPath, verbose })
+  const srcDurationMs = await getAudioDuration({ audioPath: srcAudioPath })
+  const result = await stretchAudioDuration({ durationMs: srcDurationMs, audioPath: distAudioPath, verbose })
   verbose && log.normal('Synced audios duration', { srcAudioPath, distAudioPath })
   return result
 }
