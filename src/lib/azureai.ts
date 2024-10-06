@@ -5,6 +5,7 @@ import {
   createSilentAudio,
   getAudioDuration,
   normalizeAudioDuration,
+  stretchAudioDuration,
   syncAudiosDuration,
 } from '@/lib/editor.js'
 import { getEnv } from '@/lib/env.js'
@@ -30,6 +31,21 @@ type TtsTask = {
   durationMs: number
   type: 'speach' | 'gap'
   voiceName: string
+  lang: string
+}
+
+type TtsTaskPart = {
+  durationMs: number
+  type: 'speach' | 'gap'
+  voiceName: string
+  text: string
+  lang: string
+}
+
+type TtsTaskPartsGroup = {
+  durationMs: number
+  type: 'speach' | 'gap'
+  ttsTaskParts: TtsTaskPart[]
 }
 
 // Helper function to convert time string to milliseconds
@@ -52,7 +68,7 @@ const escapeXml = (unsafe: string): string => {
     .replace(/'/g, '&apos;')
 }
 
-const subtitlesToTtsTasks = ({
+const subtitlesToTtsTasksParts = ({
   desiredTotalDurationMs,
   subtitles,
   voiceName,
@@ -63,17 +79,12 @@ const subtitlesToTtsTasks = ({
   voiceName: string
   lang: string
 }) => {
-  const ttsTasks: TtsTask[] = []
+  const ttsTasksParts: TtsTaskPart[] = []
 
   let currentTotalDurationMs = 0
   let prevEndMs = 0
 
   for (const subtitle of subtitles) {
-    let ssml = ''
-    ssml += `<?xml version="1.0" encoding="UTF-8"?>\n`
-    ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
-    ssml += `<voice name="${voiceName}">\n`
-
     const text = subtitle.text
 
     const startTime = subtitle.startTime // in format HH:MM:SS,mmm
@@ -91,37 +102,174 @@ const subtitlesToTtsTasks = ({
 
     if (gapMs > 0) {
       currentTotalDurationMs += gapMs
-      ttsTasks.push({
-        ssml: `<break time="${gapMs}ms"/>`,
+      ttsTasksParts.push({
+        text: '',
         durationMs: gapMs,
         type: 'gap',
         voiceName,
+        lang,
       })
     }
 
-    ssml += `<prosody duration="${desiredDurationMs}ms">${escapeXml(text)}</prosody>\n`
-    ssml += `</voice>\n`
-    ssml += `</speak>`
-
     prevEndMs = endMs
     currentTotalDurationMs += desiredDurationMs
-    ttsTasks.push({
-      ssml,
+    ttsTasksParts.push({
+      text,
       durationMs: desiredDurationMs,
       type: 'speach',
       voiceName,
+      lang,
     })
   }
 
   const remainingDurationMs = desiredTotalDurationMs - currentTotalDurationMs
   if (remainingDurationMs > 0) {
-    ttsTasks.push({
-      ssml: `<break time="${remainingDurationMs}ms"/>`,
+    ttsTasksParts.push({
+      text: '',
       durationMs: remainingDurationMs,
       type: 'gap',
       voiceName,
+      lang,
     })
   }
+  return ttsTasksParts
+}
+
+const groupTtsTasksParts = ({
+  ttsTasksParts,
+  maxSpeachDurationMs,
+  criticalMaxSpeachDurationMs,
+  maxGapDurationMs,
+}: {
+  ttsTasksParts: TtsTaskPart[]
+  maxSpeachDurationMs: number
+  criticalMaxSpeachDurationMs: number
+  maxGapDurationMs: number
+}) => {
+  // if gap is too long, add it to own group
+  // group speaches and gaps to chunks
+  const ttsTasksPartsGroups: TtsTaskPartsGroup[] = []
+
+  let currentGroup: TtsTaskPartsGroup = {
+    durationMs: 0,
+    type: 'speach',
+    ttsTaskParts: [],
+  }
+  const nextGroup = () => {
+    ttsTasksPartsGroups.push(currentGroup)
+    currentGroup = {
+      durationMs: 0,
+      type: 'speach',
+      ttsTaskParts: [],
+    } as TtsTaskPartsGroup
+  }
+
+  for (const ttsTaskPart of ttsTasksParts) {
+    if (ttsTaskPart.type === 'gap' && ttsTaskPart.durationMs > maxGapDurationMs) {
+      if (currentGroup.ttsTaskParts.length === 0) {
+        currentGroup.type = 'gap'
+        currentGroup.durationMs = ttsTaskPart.durationMs
+        currentGroup.ttsTaskParts.push(ttsTaskPart)
+        nextGroup()
+        continue
+      } else {
+        nextGroup()
+        currentGroup.type = 'gap'
+        currentGroup.durationMs = ttsTaskPart.durationMs
+        currentGroup.ttsTaskParts.push(ttsTaskPart)
+        nextGroup()
+        continue
+      }
+    }
+
+    const nextDurationMs = currentGroup.durationMs + ttsTaskPart.durationMs
+    const lastTtsTaskPart = currentGroup.ttsTaskParts.length
+      ? currentGroup.ttsTaskParts[currentGroup.ttsTaskParts.length - 1]
+      : null
+    const isEndOfSentence =
+      lastTtsTaskPart &&
+      (lastTtsTaskPart.text.endsWith('.') ||
+        lastTtsTaskPart.text.endsWith('!') ||
+        lastTtsTaskPart.text.endsWith('?') ||
+        lastTtsTaskPart.text.endsWith(';'))
+    if (nextDurationMs > maxSpeachDurationMs && isEndOfSentence) {
+      nextGroup()
+    } else if (nextDurationMs > criticalMaxSpeachDurationMs) {
+      nextGroup()
+    }
+    currentGroup.durationMs += ttsTaskPart.durationMs
+    currentGroup.ttsTaskParts.push(ttsTaskPart)
+  }
+  nextGroup()
+  const lastGroup = ttsTasksPartsGroups[ttsTasksPartsGroups.length - 1]
+  if (lastGroup.ttsTaskParts.length === 0) {
+    ttsTasksPartsGroups.pop()
+  } else if (lastGroup.durationMs === 0) {
+    ttsTasksPartsGroups.pop()
+  } else if (lastGroup.ttsTaskParts.length === 1 && lastGroup.ttsTaskParts[0].type === 'gap') {
+    lastGroup.type = 'gap'
+  }
+  // console.dir({ ttsTasksPartsGroups }, { depth: null })
+  // if (1) throw new Error('Not implemented')
+  return ttsTasksPartsGroups
+}
+
+const ttsTasksPartsGroupToTtsTask = ({ ttsTasksPartsGroup }: { ttsTasksPartsGroup: TtsTaskPartsGroup }) => {
+  const voiceName = ttsTasksPartsGroup.ttsTaskParts[0].voiceName
+  const lang = ttsTasksPartsGroup.ttsTaskParts[0].lang
+  let ssml = ''
+  ssml += `<?xml version="1.0" encoding="UTF-8"?>\n`
+  ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
+  ssml += `<voice name="${voiceName}">\n`
+
+  for (const ttsTaskPart of ttsTasksPartsGroup.ttsTaskParts) {
+    if (ttsTaskPart.type === 'speach') {
+      ssml += `<prosody duration="${ttsTaskPart.durationMs}ms">${escapeXml(ttsTaskPart.text)}</prosody>\n`
+    } else {
+      ssml += `<break time="${ttsTaskPart.durationMs}ms"/>`
+    }
+  }
+
+  ssml += `</voice>\n`
+  ssml += `</speak>`
+
+  return {
+    ssml,
+    durationMs: ttsTasksPartsGroup.durationMs,
+    type: ttsTasksPartsGroup.type,
+    voiceName,
+    lang,
+  }
+}
+
+const ttsTasksPartsGroupsToTtsTasks = ({ ttsTasksPartsGroups }: { ttsTasksPartsGroups: TtsTaskPartsGroup[] }) => {
+  return ttsTasksPartsGroups.map((ttsTasksPartsGroup) => ttsTasksPartsGroupToTtsTask({ ttsTasksPartsGroup }))
+}
+
+const subtitlesToTtsTasks = ({
+  desiredTotalDurationMs,
+  subtitles,
+  voiceName,
+  lang,
+}: {
+  desiredTotalDurationMs: number
+  subtitles: Subtitle[]
+  voiceName: string
+  lang: string
+}) => {
+  const ttsTasksParts = subtitlesToTtsTasksParts({
+    desiredTotalDurationMs,
+    subtitles,
+    voiceName,
+    lang,
+  })
+  const ttsTasksPartsGroups = groupTtsTasksParts({
+    ttsTasksParts,
+    criticalMaxSpeachDurationMs: 90_000,
+    maxSpeachDurationMs: 30_000,
+    maxGapDurationMs: 5_000,
+  })
+  const ttsTasks = ttsTasksPartsGroupsToTtsTasks({ ttsTasksPartsGroups })
   return ttsTasks
 }
 
@@ -181,7 +329,12 @@ const executeTtsTask = async ({
         )
       })
       verbose && log.normal(`Synthesized SSML chunk`)
-      await normalizeAudioDuration({
+      // await normalizeAudioDuration({
+      //   audioPath: outputAudioPath,
+      //   durationMs: ttsTask.durationMs,
+      //   verbose,
+      // })
+      await stretchAudioDuration({
         audioPath: outputAudioPath,
         durationMs: ttsTask.durationMs,
         verbose,
@@ -248,7 +401,8 @@ export const ttsByAzureai = async ({
   return { audioFilePath: distAudioPath }
 }
 
-const Stratched = async <T>(promises: Array<() => Promise<T>>): Promise<T[]> => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const promiseAllSeq = async <T>(promises: Array<() => Promise<T>>): Promise<T[]> => {
   const results = []
   for (const promise of promises) {
     results.push(await promise())
@@ -300,8 +454,8 @@ export const ttsSimpleByAzureai = async ({
     await executeTtsTask({ ttsTask, outputAudioPath, verbose })
     return outputAudioPath
   })
-  // const ttsResultsPaths = await Promise.all(promises.map(async (promise) => await promise()))
-  const ttsTempResultsPaths = await Stratched(promises)
+  const ttsTempResultsPaths = await Promise.all(promises.map(async (promise) => await promise()))
+  // const ttsTempResultsPaths = await promiseAllSeq(promises)
 
   await concatAudios({ audioPaths: ttsTempResultsPaths, outputAudioPath: distAudioPath, verbose })
   // delete temp files
