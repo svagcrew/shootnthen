@@ -1,6 +1,6 @@
 // import { getConfig } from '@/lib/config.js'
 // import fg from 'fast-glob'
-// import path from 'path'
+import path from 'path'
 // import { stringsToLikeArrayString } from 'svag-cli-utils'
 import z from 'zod'
 
@@ -42,3 +42,9 @@ export type LangRaw = (typeof langsRawAllowed)[number]
 // }
 
 export const wait = async (s: number) => await new Promise((resolve) => setTimeout(resolve, s * 1_000))
+
+export const addSuffixToFilePath = ({ filePath, suffix }: { filePath: string; suffix: string }) => {
+  const ext = path.extname(filePath)
+  const base = path.basename(filePath, ext)
+  return `${base}.${suffix}${ext}`
+}

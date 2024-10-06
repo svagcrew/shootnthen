@@ -1,8 +1,9 @@
 /* eslint-disable radix */
 import type { Config } from '@/lib/config.js'
-import { syncAudiosDuration } from '@/lib/editor.js'
+import { concatAudios, stretchAudioDuration, syncAudiosDuration } from '@/lib/editor.js'
 import { getEnv } from '@/lib/env.js'
 import { parseFileName } from '@/lib/meta.js'
+import { addSuffixToFilePath } from '@/lib/utils.js'
 import { promises as fs } from 'fs'
 import sdk from 'microsoft-cognitiveservices-speech-sdk'
 import path from 'path'
@@ -53,6 +54,14 @@ export const ttsByAzureai = async ({
   })
   verbose && log.normal('Ttsed', { audioFilePath: distAudioPath })
   return { audioFilePath: distAudioPath }
+}
+
+const promisesAllSequential = async (promises: Array<() => Promise<any>>) => {
+  const results = []
+  for (const promise of promises) {
+    results.push(await promise())
+  }
+  return results
 }
 
 export const ttsSimpleByAzureai = async ({
@@ -108,22 +117,21 @@ export const ttsSimpleByAzureai = async ({
   const voiceName = voiceMap[lang] || 'en-US-AriaNeural' // default voice if language not found
   speechConfig.speechSynthesisVoiceName = voiceName
 
-  // Create the Speech Synthesizer
-  const audioConfig = sdk.AudioConfig.fromAudioFileOutput(distAudioPath)
-  const synthesizer = new sdk.SpeechSynthesizer(speechConfig, audioConfig)
-  // TODO.0 fix it
-
   // Read and parse the SRT file
   const srtContent = await fs.readFile(srtPath, 'utf8')
   const parser = new SrtParser()
   const subtitles = parser.fromSrt(srtContent) // Parse SRT
 
-  // Build the SSML
-  let ssml = `<?xml version="1.0" encoding="UTF-8"?>\n`
+  // Build SSML chunks
+  const ssmlChunks: Array<{ ssml: string; durationMs: number }> = []
+  let ssml = ''
+  let cumulativeDurationMs = 0
+  let prevEndMs = 0
+
+  // Start the first SSML chunk
+  ssml += `<?xml version="1.0" encoding="UTF-8"?>\n`
   ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
   ssml += `<voice name="${voiceName}">\n`
-
-  let prevEndMs = 0
 
   for (const subtitle of subtitles) {
     const text = subtitle.text
@@ -137,55 +145,111 @@ export const ttsSimpleByAzureai = async ({
 
     // Calculate gap from previous end to current start
     const gapMs = startMs - prevEndMs
-    if (gapMs > 0) {
-      ssml += `<break time="${gapMs}ms"/>\n`
-    }
 
     // Calculate the desired duration for this subtitle
     const desiredDurationMs = endMs - startMs
 
+    const chunkDurationLimitSec = 15
+    const chunkDurationLimitMs = chunkDurationLimitSec * 1_000
+    if (cumulativeDurationMs + desiredDurationMs + gapMs > chunkDurationLimitMs && cumulativeDurationMs) {
+      // Close the current SSML chunk
+      ssml += `</voice>\n`
+      ssml += `</speak>`
+      // Add the completed SSML chunk to the array
+      ssmlChunks.push({ ssml, durationMs: cumulativeDurationMs })
+
+      // Start a new SSML chunk
+      ssml = `<?xml version="1.0" encoding="UTF-8"?>\n`
+      ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
+      ssml += `<voice name="${voiceName}">\n`
+
+      // Reset cumulative duration
+      cumulativeDurationMs = 0
+      prevEndMs = startMs
+    }
+
+    if (gapMs > 0) {
+      ssml += `<break time="${gapMs}ms"/>\n`
+    }
+
     // Add the text with specified duration using prosody
     ssml += `<prosody duration="${desiredDurationMs}ms">${escapeXml(text)}</prosody>\n`
 
+    cumulativeDurationMs += desiredDurationMs + gapMs
     prevEndMs = endMs
   }
 
+  // After the loop, close the last SSML chunk
   ssml += `</voice>\n`
   ssml += `</speak>`
+  ssmlChunks.push({ ssml, durationMs: cumulativeDurationMs })
 
-  verbose && log.normal('SSML:', ssml)
+  verbose && log.normal(`Generated ${ssmlChunks.length} SSML chunks`)
 
-  // Synthesize the SSML to audio file (async)
-  await new Promise<void>((resolve, reject) => {
-    synthesizer.speakSsmlAsync(
-      ssml,
-      (result) => {
-        if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
-          resolve()
-        } else {
-          reject(new Error(`Speech synthesis failed: ${result.errorDetails}`))
+  const promises = ssmlChunks.map((ssmlChunk, i) => async () => {
+    let tryIndex = 0
+    while (tryIndex < 10) {
+      try {
+        // Create the Speech Synthesizer
+        const distAudioTempPath = addSuffixToFilePath({ filePath: distAudioPath, suffix: `temp-${i}` })
+        const audioConfig = sdk.AudioConfig.fromAudioFileOutput(distAudioTempPath)
+        const synthesizer = new sdk.SpeechSynthesizer(speechConfig, audioConfig)
+
+        // Synthesize the SSML to audio file (async)
+        verbose && log.normal(`Synthesizing SSML chunk ${i + 1} (duration: ${ssmlChunk.durationMs}ms)`, ssmlChunk.ssml)
+        await new Promise<void>((resolve, reject) => {
+          synthesizer.speakSsmlAsync(
+            ssmlChunk.ssml,
+            (result) => {
+              if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
+                resolve()
+              } else {
+                reject(new Error(`Speech synthesis failed: ${result.errorDetails}`))
+              }
+              synthesizer.close()
+            },
+            (err) => {
+              synthesizer.close()
+              reject(err)
+            }
+          )
+        })
+        verbose && log.normal(`Synthesized SSML chunk ${i + 1}`)
+        await stretchAudioDuration({
+          audioPath: distAudioTempPath,
+          // in seconds
+          duration: ssmlChunk.durationMs / 1_000,
+          verbose,
+        })
+      } catch (error: any) {
+        if (
+          error.messages ===
+          'Speech synthesis failed: Status(StatusCode="ResourceExhausted", Detail="No free synthesizer") websocket error code: 1013'
+        ) {
+          verbose && log.normal('Speech synthesis failed: No free synthesizer', { tryIndex })
+          tryIndex++
+          await new Promise((resolve) => setTimeout(resolve, 10_000))
         }
-        synthesizer.close()
-      },
-      (err) => {
-        synthesizer.close()
-        reject(err)
+        throw error
       }
-    )
+    }
   })
-
-  // Synthesize the SSML to audio file (batch start)
-  // TODO.1
-
-  // Synthesize the SSML to audio file (batch check)
-  // TODO.2
-
-  // Synthesize the SSML to audio file (batch retrieve and save to file)
-  // TODO.3
-
+  await Promise.all(promises.map(async (promise) => await promise()))
+  // await promisesAllSequential(promises)
+  const distAudioTempPaths = ssmlChunks.map((_, i) =>
+    addSuffixToFilePath({ filePath: distAudioPath, suffix: `temp-${i}` })
+  )
+  await concatAudios({ audioPaths: distAudioTempPaths, outputAudioPath: distAudioPath, verbose })
+  // delete temp files
+  await Promise.all(distAudioTempPaths.map(async (distAudioTempPath) => await fs.unlink(distAudioTempPath)))
   await syncAudiosDuration({
     srcAudioPath,
     distAudioPath,
     verbose,
   })
 }
+
+// TODO:ASAP do much more many temp ssml results to sync correct chronology
+// TODO:ASAP manual translate by chatgpt
+// TODO:ASAP tru zure stt but not revai
+// TODO:ASAP split voice and background

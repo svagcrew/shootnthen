@@ -2,7 +2,7 @@
 import type { Config } from '@/lib/config.js'
 import { parseFileName } from '@/lib/meta.js'
 import type { Lang } from '@/lib/utils.js'
-import { fromRawLang } from '@/lib/utils.js'
+import { addSuffixToFilePath, fromRawLang } from '@/lib/utils.js'
 import ffmpeg from 'fluent-ffmpeg'
 import langCodesLib from 'langs'
 import path from 'path'
@@ -296,12 +296,6 @@ export const getAudioDuration = async ({ audioPath }: { audioPath: string }) => 
   return duration
 }
 
-const addSuffixToFilePath = ({ filePath, suffix }: { filePath: string; suffix: string }) => {
-  const ext = path.extname(filePath)
-  const base = path.basename(filePath, ext)
-  return `${base}.${suffix}${ext}`
-}
-
 export const stretchAudioDuration = async ({
   duration,
   audioPath,
@@ -363,5 +357,26 @@ export const syncAudiosDuration = async ({
   verbose && log.normal('Syncing audios duration', { srcAudioPath, distAudioPath })
   const srcDuration = await getAudioDuration({ audioPath: srcAudioPath })
   const result = await stretchAudioDuration({ duration: srcDuration, audioPath: distAudioPath, verbose })
+  verbose && log.normal('Synced audios duration', { srcAudioPath, distAudioPath })
   return result
+}
+
+export const concatAudios = async ({
+  audioPaths,
+  outputAudioPath,
+  verbose,
+}: {
+  audioPaths: string[]
+  outputAudioPath: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Concatenating audios', { audioPaths, outputAudioPath })
+  const inputAudioPaths = audioPaths.map((audioPath) => `-i "${audioPath}"`).join(' ')
+  const nativeCommand = `ffmpeg ${inputAudioPaths} -filter_complex concat=n=${audioPaths.length}:v=0:a=1 -y "${outputAudioPath}"`
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+  verbose && log.normal('Concatenated audios', { audioPaths, outputAudioPath })
+  return {
+    audioPaths,
+    outputAudioPath,
+  }
 }
