@@ -4,6 +4,7 @@ import {
   concatAudios,
   createSilentAudio,
   getAudioDuration,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   normalizeAudioDuration,
   stretchAudioDuration,
   syncAudiosDuration,
@@ -66,6 +67,7 @@ const escapeXml = (unsafe: string): string => {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;')
+    .replace(/\n/g, ' ')
 }
 
 const subtitlesToTtsTasksParts = ({
@@ -135,6 +137,116 @@ const subtitlesToTtsTasksParts = ({
   return ttsTasksParts
 }
 
+const reorganizeTtsTasksParts = ({
+  ttsTasksParts,
+  minSpeachDurationMs,
+  maxSpeachDurationMs,
+  maxGapDurationMs,
+}: {
+  ttsTasksParts: TtsTaskPart[]
+  minSpeachDurationMs: number
+  maxSpeachDurationMs: number
+  maxGapDurationMs: number
+}) => {
+  // it should create new ttsTasksParts array
+  // there should be same ttsTasksParts but without breaks of sentences.
+  // if sentence is too long, it should be splitted to parts (maxGapDurationMs, criticalMaxSpeachDurationMs)
+  // if gap is too long, it should be in his own part
+  // if part is too short it should be merged with next part
+
+  const newTtsTasksParts: TtsTaskPart[] = []
+
+  let currentTtsTaskPart: TtsTaskPart = {
+    durationMs: 0,
+    type: 'speach',
+    voiceName: ttsTasksParts[0].voiceName,
+    text: '',
+    lang: ttsTasksParts[0].lang,
+  }
+  const nextTtsTaskPart = () => {
+    newTtsTasksParts.push(currentTtsTaskPart)
+    currentTtsTaskPart = {
+      durationMs: 0,
+      type: 'speach',
+      voiceName: ttsTasksParts[0].voiceName,
+      text: '',
+      lang: ttsTasksParts[0].lang,
+    }
+  }
+  const appendCurrentTtsTaskPart = (ttsTaskPart: TtsTaskPart) => {
+    currentTtsTaskPart.durationMs += ttsTaskPart.durationMs
+    currentTtsTaskPart.text = (currentTtsTaskPart.text + ' ' + ttsTaskPart.text).trim()
+  }
+
+  for (const [i, ttsTaskPart] of ttsTasksParts.entries()) {
+    if (ttsTaskPart.type === 'gap') {
+      const isLastPart = i === ttsTasksParts.length - 1
+      const isFirstPart = i === 0
+      if (isLastPart) {
+        nextTtsTaskPart()
+        currentTtsTaskPart = ttsTaskPart
+        nextTtsTaskPart()
+        continue
+      } else if (isFirstPart) {
+        currentTtsTaskPart = ttsTaskPart
+        nextTtsTaskPart()
+        continue
+      } else if (currentTtsTaskPart.durationMs === 0) {
+        currentTtsTaskPart = ttsTaskPart
+        nextTtsTaskPart()
+        continue
+      } else if (ttsTaskPart.durationMs > maxGapDurationMs) {
+        nextTtsTaskPart()
+        currentTtsTaskPart = ttsTaskPart
+        nextTtsTaskPart()
+        continue
+      } else {
+        continue
+      }
+    }
+
+    const itIsEndOfSentence = isEndOfSentence(ttsTaskPart.text)
+    if (!itIsEndOfSentence) {
+      const nextDurationMs = currentTtsTaskPart.durationMs + ttsTaskPart.durationMs
+      if (nextDurationMs > maxSpeachDurationMs) {
+        nextTtsTaskPart()
+        currentTtsTaskPart = ttsTaskPart
+        continue
+      } else {
+        appendCurrentTtsTaskPart(ttsTaskPart)
+        continue
+      }
+    }
+
+    const isTooShort = currentTtsTaskPart.durationMs < minSpeachDurationMs
+    if (isTooShort) {
+      appendCurrentTtsTaskPart(ttsTaskPart)
+      continue
+    } else {
+      appendCurrentTtsTaskPart(ttsTaskPart)
+      nextTtsTaskPart()
+      continue
+    }
+  }
+  nextTtsTaskPart()
+  const lastTtsTaskPart = newTtsTasksParts[newTtsTasksParts.length - 1]
+  if (lastTtsTaskPart.durationMs === 0) {
+    newTtsTasksParts.pop()
+  }
+  return newTtsTasksParts
+}
+
+const isEndOfSentence = (text: string) => {
+  return (
+    text.endsWith('.') ||
+    text.endsWith('!') ||
+    text.endsWith('?') ||
+    text.endsWith(';') ||
+    text.endsWith(')') ||
+    text.endsWith(']')
+  )
+}
+
 const groupTtsTasksParts = ({
   ttsTasksParts,
   maxSpeachDurationMs,
@@ -186,13 +298,8 @@ const groupTtsTasksParts = ({
     const lastTtsTaskPart = currentGroup.ttsTaskParts.length
       ? currentGroup.ttsTaskParts[currentGroup.ttsTaskParts.length - 1]
       : null
-    const isEndOfSentence =
-      lastTtsTaskPart &&
-      (lastTtsTaskPart.text.endsWith('.') ||
-        lastTtsTaskPart.text.endsWith('!') ||
-        lastTtsTaskPart.text.endsWith('?') ||
-        lastTtsTaskPart.text.endsWith(';'))
-    if (nextDurationMs > maxSpeachDurationMs && isEndOfSentence) {
+    const itIsEndOfSentence = lastTtsTaskPart && isEndOfSentence(lastTtsTaskPart.text)
+    if (nextDurationMs > maxSpeachDurationMs && itIsEndOfSentence) {
       nextGroup()
     } else if (nextDurationMs > criticalMaxSpeachDurationMs) {
       nextGroup()
@@ -257,14 +364,23 @@ const subtitlesToTtsTasks = ({
   voiceName: string
   lang: string
 }) => {
-  const ttsTasksParts = subtitlesToTtsTasksParts({
+  const initialTtsTasksParts = subtitlesToTtsTasksParts({
     desiredTotalDurationMs,
     subtitles,
     voiceName,
     lang,
   })
+  // console.dir({ initialTtsTasksParts }, { depth: null })
+  const reorganizedTtsTasksParts = reorganizeTtsTasksParts({
+    ttsTasksParts: initialTtsTasksParts,
+    minSpeachDurationMs: 3_000,
+    maxSpeachDurationMs: 30_000,
+    maxGapDurationMs: 2_000,
+  })
+  // console.dir({ reorganizedTtsTasksParts }, { depth: null })
+  // if (1) throw new Error('Not implemented')
   const ttsTasksPartsGroups = groupTtsTasksParts({
-    ttsTasksParts,
+    ttsTasksParts: reorganizedTtsTasksParts,
     criticalMaxSpeachDurationMs: 90_000,
     maxSpeachDurationMs: 30_000,
     maxGapDurationMs: 5_000,
@@ -467,7 +583,10 @@ export const ttsSimpleByAzureai = async ({
   })
 }
 
-// TODO:ASAP do much more many temp ssml results to sync correct chronology
-// TODO:ASAP manual translate by chatgpt
-// TODO:ASAP tru zure stt but not revai
+// TODO:ASAP try azure stt but not revai
+// TODO:ASAP translate by chatgpt but not revai
+// TODO:ASAP apply srt to mp4
+
+// TODO:ASAP translate course
+
 // TODO:ASAP split voice and background
