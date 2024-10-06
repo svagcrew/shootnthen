@@ -34,6 +34,7 @@ const zEnv = z.object({
   REVAI_ACCESS_TOKEN: z.string(),
   AZURE_AI_KEY: z.string(),
   AZURE_AI_REGION: z.string(),
+  OPENAI_API_KEY: z.string(),
 })
 
 type Env = z.infer<typeof zEnv>

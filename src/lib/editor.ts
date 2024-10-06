@@ -2,7 +2,7 @@
 import type { Config } from '@/lib/config.js'
 import { parseFileName } from '@/lib/meta.js'
 import type { Lang } from '@/lib/utils.js'
-import { addSuffixToFilePath, fromRawLang } from '@/lib/utils.js'
+import { addSuffixToFilePath, fromRawLang, replaceExt } from '@/lib/utils.js'
 import ffmpeg from 'fluent-ffmpeg'
 import { promises as fs } from 'fs'
 import langCodesLib from 'langs'
@@ -139,6 +139,22 @@ export const converWavToMp3 = async ({
   return {
     inputWavPath,
     outputMp3Path,
+  }
+}
+
+export const convertMp3ToWav = async ({
+  inputMp3Path,
+  outputWavPath,
+}: {
+  inputMp3Path: string
+  outputWavPath?: string
+}) => {
+  outputWavPath = outputWavPath || replaceExt({ filePath: inputMp3Path, ext: 'wav' })
+  const nativeCommand = `ffmpeg -i "${inputMp3Path}" -y "${outputWavPath}"`
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+  return {
+    inputMp3Path,
+    outputWavPath,
   }
 }
 

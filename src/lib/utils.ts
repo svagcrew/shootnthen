@@ -48,3 +48,8 @@ export const addSuffixToFilePath = ({ filePath, suffix }: { filePath: string; su
   const base = path.basename(filePath, ext)
   return `${base}.${suffix}${ext}`
 }
+
+export const replaceExt = ({ filePath, ext }: { filePath: string; ext: string }) => {
+  const base = path.basename(filePath, path.extname(filePath))
+  return `${base}.${ext}`
+}

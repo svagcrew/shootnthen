@@ -51,6 +51,7 @@
     "lodash": "^4.17.21",
     "microsoft-cognitiveservices-speech-sdk": "^1.40.0",
     "node-fetch": "^2.7.0",
+    "openai": "^4.67.1",
     "puppeteer": "^22.8.0",
     "readline-sync": "^1.4.10",
     "revai-node-sdk": "^3.8.5",

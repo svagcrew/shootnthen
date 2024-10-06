@@ -10,6 +10,7 @@ import { googleDrive } from '@/lib/googledrive.js'
 import { kinescope } from '@/lib/kinescope.js'
 import { loom } from '@/lib/loom.js'
 import { getMetaByFilePath, parseFileName } from '@/lib/meta.js'
+import { translateSrtByOpenai } from '@/lib/openai.js'
 import { rask } from '@/lib/rask.js'
 import { extractSrtByRevai } from '@/lib/revai.js'
 import type { LangProcessed } from '@/lib/utils.js'
@@ -269,7 +270,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       })
       // const lang = zLang.parse(langRaw)
       const { lang } = z.object({ lang: zLang }).parse({ lang: langRaw })
-      const { audioFilePath } = await extractAudio({ config, filePath: args[0], lang, verbose })
+      const { audioFilePath } = await extractAudio({ config, filePath: args[0], lang, verbose, force })
       log.green(audioFilePath)
       break
     }
@@ -765,8 +766,8 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
 
-    case 'extract-srt':
-    case 'es': {
+    case 'extract-srt-revai':
+    case 'esr': {
       const { lang, filePath, translatedLangs } = z
         .object({ lang: zLang.optional(), filePath: z.string().min(1), translatedLangs: z.array(zLangProcessed) })
         .parse({
@@ -787,6 +788,61 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       log.green(srtFilePath)
       break
     }
+
+    case 'translate-srt':
+    case 'ts': {
+      const { srcSrtPath, distSrtPath, srcLang, distLang } = z
+        .object({
+          srcSrtPath: z.string().min(1),
+          distSrtPath: z.string().optional(),
+          srcLang: zLangProcessed.optional(),
+          distLang: zLangProcessed,
+        })
+        .parse({
+          srcSrtPath: args[0],
+          distSrtPath: getFlagAsString({
+            flags,
+            keys: ['dist-srt', 'ds'],
+            coalesce: undefined,
+          }),
+          srcLang: getFlagAsString({
+            flags,
+            keys: ['src-lang', 'sl'],
+            coalesce: undefined,
+          }),
+          distLang: getFlagAsString({
+            flags,
+            keys: ['dist-lang', 'dl'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await translateSrtByOpenai({
+        config,
+        srcSrtPath,
+        distSrtPath,
+        srcLang,
+        distLang,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    // case 'extract-srt-azureai':
+    // case 'esa': {
+    //   const { lang, filePath } = z.object({ lang: zLang.optional(), filePath: z.string().min(1) }).parse({
+    //     lang: getFlagAsString({
+    //       flags,
+    //       keys: ['lang', 'l'],
+    //       coalesce: undefined,
+    //     }),
+    //     filePath: args[0],
+    //   })
+    //   const { srtFilePath } = await extractSrtByAzureai({ config, lang, verbose, filePath, force })
+    //   log.green(srtFilePath)
+    //   break
+    // }
 
     case 'tts': {
       const { lang, srtPath, srcAudioPath } = z
@@ -912,7 +968,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       if (!filePathAbs.endsWith('.mp4')) {
         throw new Error('File is not mp4')
       }
-      const extractResult = await extractAudio({ config, filePath: filePathAbs, lang: srcLang, verbose })
+      const extractResult = await extractAudio({ config, filePath: filePathAbs, lang: srcLang, verbose, force })
       const originalAudioParsedName = parseFileName(extractResult.audioFilePath)
       const originalLangRaw = originalAudioParsedName.langSingle
       if (!originalLangRaw) {
@@ -1116,6 +1172,10 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         uy | upload-to-youtube --title <title> <filePath>
 
         boom <loomPublicUrl> --src-lang <srcLang> --dist-langs <distLangs>
+
+        esr | extract-srt-revai <filePath> --lang <lang> --translated-langs <translatedLangs>
+        (deprecated) esa | extract-srt-azureai <filePath> --lang <lang>
+        tts <srtPath> --lang <lang> --src-audio <srcAudioPath>
 
         clear <dirPath>
         h — help
