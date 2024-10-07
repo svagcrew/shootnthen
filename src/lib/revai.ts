@@ -1,6 +1,7 @@
 import type { Config } from '@/lib/config.js'
 import { getEnv } from '@/lib/env.js'
 import { parseFileName } from '@/lib/meta.js'
+import { prettifySrtContent } from '@/lib/srt.js'
 import type { Lang } from '@/lib/utils.js'
 import { wait } from '@/lib/utils.js'
 import { promises as fs } from 'fs'
@@ -114,8 +115,11 @@ export const extractSrtSimpleByRevai = async ({
   }
 
   verbose && log.normal('Getting original captions', { jobId: job.id })
-  const captions = await client.getCaptions(job.id)
-  await fs.writeFile(outputSrtPath, captions)
+  const captionsRaw = await client.getCaptions(job.id)
+  await fs.writeFile(outputSrtPath, captionsRaw)
+  const captions = await fs.readFile(outputSrtPath, 'utf8')
+  const prettifyedCaptions = await prettifySrtContent({ srtContent: captions })
+  await fs.writeFile(outputSrtPath, prettifyedCaptions)
   const json = await client.getTranscriptObject(job.id)
   await fs.writeFile(outputJsonPath, JSON.stringify(json, null, 2))
   const txt = await client.getTranscriptText(job.id)
@@ -143,8 +147,11 @@ export const extractSrtSimpleByRevai = async ({
     const translatedTxtPath = translatedTxtPaths[i]
     await wait(5) // waiting for translated captions
     verbose && log.normal('Getting translated captions', { jobId: job.id, translatedLang })
-    const translatedCaptions = await client.getTranslatedCaptions(job.id, translatedLang)
-    await fs.writeFile(translatedSrtPath, translatedCaptions)
+    const translatedCaptionsRaw = await client.getTranslatedCaptions(job.id, translatedLang)
+    await fs.writeFile(translatedSrtPath, translatedCaptionsRaw)
+    const translatedCaptions = await fs.readFile(translatedSrtPath, 'utf8')
+    const translatedPrettifyedCaptions = await prettifySrtContent({ srtContent: translatedCaptions })
+    await fs.writeFile(translatedSrtPath, translatedPrettifyedCaptions)
     const translatedJson = await client.getTranslatedTranscriptObject(job.id, translatedLang)
     await fs.writeFile(translatedJsonPath, JSON.stringify(translatedJson, null, 2))
     const translatedTxt = await client.getTranslatedTranscriptText(job.id, translatedLang)

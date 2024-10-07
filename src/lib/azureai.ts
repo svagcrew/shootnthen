@@ -1,4 +1,3 @@
-/* eslint-disable radix */
 import type { Config } from '@/lib/config.js'
 import {
   concatAudios,
@@ -9,6 +8,7 @@ import {
 } from '@/lib/editor.js'
 import { getEnv } from '@/lib/env.js'
 import { parseFileName } from '@/lib/meta.js'
+import { timeStringToMilliseconds } from '@/lib/srt.js'
 import { addSuffixToFilePath } from '@/lib/utils.js'
 import { promises as fs } from 'fs'
 import sdk from 'microsoft-cognitiveservices-speech-sdk'
@@ -45,16 +45,6 @@ type TtsTaskPartsGroup = {
   durationMs: number
   type: 'speach' | 'gap'
   ttsTaskParts: TtsTaskPart[]
-}
-
-// Helper function to convert time string to milliseconds
-const timeStringToMilliseconds = (timeString: string): number => {
-  // Format HH:MM:SS,mmm
-  const [hours, minutes, rest] = timeString.split(':')
-  const [seconds, milliseconds] = rest.replace(',', '.').split('.')
-  const totalMs =
-    parseInt(hours) * 3_600_000 + parseInt(minutes) * 60_000 + parseInt(seconds) * 1_000 + parseInt(milliseconds)
-  return totalMs
 }
 
 // Helper function to escape XML special characters
@@ -339,6 +329,7 @@ const subtitlesToTtsTasksParts = ({
   return ttsTasksParts
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const reorganizeTtsTasksParts = ({
   ttsTasksParts,
   minSpeachDurationMs,
@@ -402,8 +393,6 @@ const reorganizeTtsTasksParts = ({
         currentTtsTaskPart = ttsTaskPart
         nextTtsTaskPart()
         continue
-      } else {
-        continue
       }
     }
 
@@ -420,12 +409,11 @@ const reorganizeTtsTasksParts = ({
       }
     }
 
+    appendCurrentTtsTaskPart(ttsTaskPart)
     const isTooShort = currentTtsTaskPart.durationMs < minSpeachDurationMs
     if (isTooShort) {
-      appendCurrentTtsTaskPart(ttsTaskPart)
       continue
     } else {
-      appendCurrentTtsTaskPart(ttsTaskPart)
       nextTtsTaskPart()
       continue
     }
@@ -528,14 +516,14 @@ const ttsTasksPartsGroupToTtsTask = ({ ttsTasksPartsGroup }: { ttsTasksPartsGrou
   const lang = ttsTasksPartsGroup.ttsTaskParts[0].lang
   let ssml = ''
   ssml += `<?xml version="1.0" encoding="UTF-8"?>\n`
-  ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">\n`
+  ssml += `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="${lang}">\n`
   ssml += `<voice name="${voiceName}">\n`
 
   for (const ttsTaskPart of ttsTasksPartsGroup.ttsTaskParts) {
     if (ttsTaskPart.type === 'speach') {
       ssml += `<prosody duration="${ttsTaskPart.durationMs}ms">${escapeXml(ttsTaskPart.text)}</prosody>\n`
     } else {
-      ssml += `<break time="${ttsTaskPart.durationMs}ms"/>`
+      ssml += `<break time="${ttsTaskPart.durationMs}ms"/>\n`
     }
   }
 
@@ -572,13 +560,15 @@ const subtitlesToTtsTasks = ({
     voiceName,
     lang,
   })
-  // console.dir({ initialTtsTasksParts }, { depth: null })
-  const reorganizedTtsTasksParts = reorganizeTtsTasksParts({
-    ttsTasksParts: initialTtsTasksParts,
-    minSpeachDurationMs: 3_000,
-    maxSpeachDurationMs: 30_000,
-    maxGapDurationMs: 2_000,
-  })
+  // Now we reorganize on extractin text from speach
+  // // console.dir({ initialTtsTasksParts }, { depth: null })
+  // const reorganizedTtsTasksParts = reorganizeTtsTasksParts({
+  //   ttsTasksParts: initialTtsTasksParts,
+  //   minSpeachDurationMs: 3_000,
+  //   maxSpeachDurationMs: 30_000,
+  //   maxGapDurationMs: 2_000,
+  // })
+  const reorganizedTtsTasksParts = initialTtsTasksParts
   // console.dir({ reorganizedTtsTasksParts }, { depth: null })
   // if (1) throw new Error('Not implemented')
   const ttsTasksPartsGroups = groupTtsTasksParts({
@@ -789,10 +779,8 @@ export const ttsSimpleByAzureai = async ({
   })
 }
 
-// TODO:ASAP translate by chatgpt but not revai
+// TODO:ASAP ? apply srt to mp4
 
-// TODO:ASAP apply srt to mp4
+// TODO:ASAP ! translate course
 
-// TODO:ASAP translate course
-
-// TODO:ASAP split voice and background
+// TODO:ASAP ! split voice and background

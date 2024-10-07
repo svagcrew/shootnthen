@@ -13,6 +13,7 @@ import { getMetaByFilePath, parseFileName } from '@/lib/meta.js'
 import { translateSrtByOpenai } from '@/lib/openai.js'
 import { rask } from '@/lib/rask.js'
 import { extractSrtByRevai } from '@/lib/revai.js'
+import { prettifySrt } from '@/lib/srt.js'
 import type { LangProcessed } from '@/lib/utils.js'
 import { fromRawLang, zLang, zLangProcessed } from '@/lib/utils.js'
 import { youtube } from '@/lib/youtube.js'
@@ -786,6 +787,14 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         })
       const { srtFilePath } = await extractSrtByRevai({ config, lang, verbose, filePath, translatedLangs, force })
       log.green(srtFilePath)
+      break
+    }
+
+    case 'prettify-srt':
+    case 'ps': {
+      const srtName = args[0]
+      const result = await prettifySrt({ config, srtName, verbose, force })
+      log.green(result)
       break
     }
 
