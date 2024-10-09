@@ -767,6 +767,30 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
 
+    case 'download-from-youtube':
+    case 'dy': {
+      const { url, filePath } = z
+        .object({
+          url: z.string().min(1),
+          filePath: z.string().optional(),
+        })
+        .parse({
+          url: getFlagAsString({
+            flags,
+            keys: ['url', 'u'],
+            coalesce: undefined,
+          }),
+          filePath: getFlagAsString({
+            flags,
+            keys: ['file', 'f'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await youtube.downloadFile({ config, url, filePath, verbose, force })
+      log.green(result)
+      break
+    }
+
     case 'extract-srt-revai':
     case 'esr': {
       const { lang, filePath, translatedLangs } = z
@@ -1179,6 +1203,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         apa | auphonic-process-audio --dist-file-path <distFilePath> <srcFilePath>
 
         uy | upload-to-youtube --title <title> <filePath>
+        dy | download-from-youtube -u <url> -f <filePath>
 
         boom <loomPublicUrl> --src-lang <srcLang> --dist-langs <distLangs>
 

@@ -1,10 +1,11 @@
 import type { Config } from '@/lib/config.js'
 import { getGoogleAuthClient } from '@/lib/google.js'
 import { getMetaByFilePath, updateMeta } from '@/lib/meta.js'
-import fsync from 'fs'
+import fsync, { createWriteStream } from 'fs'
 import { google } from 'googleapis'
 import path from 'path'
-import { log } from 'svag-cli-utils'
+import { isFileExistsSync, log } from 'svag-cli-utils'
+import ytdl from 'ytdl-core'
 
 const getYoutubeClient = async ({ config }: { config: Config }) => {
   const { authClient } = await getGoogleAuthClient({ config })
@@ -67,6 +68,41 @@ const uploadFile = async ({
   }
 }
 
+const downloadFile = async ({
+  config,
+  url,
+  filePath,
+  force,
+  verbose,
+}: {
+  config: Config
+  url: string
+  filePath?: string
+  force?: boolean
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Downloading file from youtube', { url })
+  const videoId = ytdl.getURLVideoID(url)
+  filePath = path.resolve(config.contentDir, filePath || `${videoId}.mp4`)
+  const { fileExists } = isFileExistsSync({ filePath })
+  if (fileExists && !force) {
+    verbose && log.normal('Video file already exists', { filePath })
+    return { filePath }
+  }
+  const ydtlStream = ytdl(url)
+  const writeStream = createWriteStream(filePath)
+  ydtlStream.pipe(writeStream)
+  await new Promise((resolve, reject) => {
+    writeStream.on('finish', resolve)
+    writeStream.on('error', reject)
+  })
+  verbose && log.normal('Downloaded file from youtube', { filePath })
+  return {
+    filePath,
+  }
+}
+
 export const youtube = {
   uploadFile,
+  downloadFile,
 }

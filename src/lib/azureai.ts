@@ -779,7 +779,9 @@ export const ttsSimpleByAzureai = async ({
   })
 }
 
-// TODO:ASAP ? apply srt to mp4
+// TODO:ASAP stretch if not end of sentence, else normalize
+
+// TODO:ASAP ! apply srt to mp4
 
 // TODO:ASAP ! translate course
 
