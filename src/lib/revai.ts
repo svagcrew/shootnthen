@@ -25,6 +25,7 @@ export const extractSrtByRevai = async ({
   verbose?: boolean
 }) => {
   verbose && log.normal('Extracting srt', { filePath, lang })
+  filePath = path.resolve(config.contentDir, filePath)
   const parsed = parseFileName(filePath)
   if (parsed.ext !== 'mp3') {
     throw new Error('Only mp3 files are allowed')
@@ -37,11 +38,11 @@ export const extractSrtByRevai = async ({
     }
   }
   const srtFileName = `${parsed.name}.${lang}.srt`
-  const srtFilePath = path.resolve(config.contentDir, srtFileName)
+  const srtFilePath = path.resolve(parsed.dirname, srtFileName)
   const jsonFileName = `${parsed.name}.${lang}.json`
-  const jsonFilePath = path.resolve(config.contentDir, jsonFileName)
+  const jsonFilePath = path.resolve(parsed.dirname, jsonFileName)
   const txtFileName = `${parsed.name}.${lang}.txt`
-  const txtFilePath = path.resolve(config.contentDir, txtFileName)
+  const txtFilePath = path.resolve(parsed.dirname, txtFileName)
   const { fileExists } = isFileExistsSync({ filePath: srtFilePath })
   if (fileExists && !force) {
     verbose && log.normal('Srt file already exists', { srtFilePath })

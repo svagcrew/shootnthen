@@ -683,6 +683,7 @@ export const ttsByAzureai = async ({
   verbose?: boolean
 }) => {
   verbose && log.normal('Ttsing', { srtPath, lang })
+  srtPath = path.resolve(config.contentDir, srtPath)
   const parsed = parseFileName(srtPath)
   if (parsed.ext !== 'srt') {
     throw new Error('Only srt files are allowed')
@@ -695,7 +696,7 @@ export const ttsByAzureai = async ({
     }
   }
   const distAudioName = `${parsed.name}.${lang}.mp3`
-  const distAudioPath = path.resolve(config.contentDir, distAudioName)
+  const distAudioPath = path.resolve(parsed.dirname, distAudioName)
   const { fileExists } = isFileExistsSync({ filePath: distAudioPath })
   if (fileExists && !force) {
     verbose && log.normal('Audio file already exists', { distAudioPath })
@@ -789,6 +790,79 @@ export const ttsSimpleByAzureai = async ({
     srcAudioPath,
     distAudioPath,
     verbose,
+  })
+}
+
+export const ttsMegasimpleByAzureai = async ({
+  text,
+  distAudioPath,
+  lang,
+  verbose,
+}: {
+  text: string
+  distAudioPath: string
+  lang: string
+  verbose?: boolean
+}) => {
+  // Map language codes to voice names
+  const voiceMap: { [key: string]: string } = {
+    en: 'en-US-AndrewMultilingualNeural',
+    ru: 'ru-RU-DmitryNeural',
+    es: 'es-ES-AlvaroNeural',
+    pt: 'pt-BR-AntonioNeural',
+    it: 'it-IT-DiegoNeural',
+    de: 'de-DE-ConradNeural',
+    tr: 'tr-TR-AhmetNeural',
+  }
+  // const voiceMapFemale: { [key: string]: string } = {
+  //   en: 'en-US-AvaMultilingualNeural',
+  //   ru: 'ru-RU-SvetlanaNeural',
+  //   es: 'es-ES-ElviraNeural',
+  //   pt: 'pt-BR-FranciscaNeural',
+  //   it: 'it-IT-ElsaNeural',
+  //   de: 'de-DE-KatjaNeural',
+  //   tr: 'tr-TR-EmelNeural',
+  // }
+  const voiceName = voiceMap[lang] || 'en-US-AriaNeural' // default voice if language not found
+
+  // Azure Speech SDK credentials
+  const subscriptionKey = getEnv('AZURE_AI_KEY')
+  const serviceRegion = getEnv('AZURE_AI_REGION')
+  if (!subscriptionKey || !serviceRegion) {
+    throw new Error('Azure Speech SDK credentials not found')
+  }
+
+  // Initialize the Azure Speech SDK speech config
+  const speechConfig = sdk.SpeechConfig.fromSubscription(subscriptionKey, serviceRegion)
+  speechConfig.speechSynthesisOutputFormat = sdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
+  speechConfig.speechSynthesisVoiceName = voiceName
+
+  // Create the audio configuration
+  const audioConfig = sdk.AudioConfig.fromAudioFileOutput(distAudioPath)
+
+  // Create the speech synthesizer
+  const synthesizer = new sdk.SpeechSynthesizer(speechConfig, audioConfig)
+
+  // Create the speech synthesizer
+  // Synthesize the text to speech and save to file
+  await new Promise<void>((resolve, reject) => {
+    synthesizer.speakTextAsync(
+      text,
+      (result) => {
+        if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
+          verbose && log.normal(`Synthesized audio`, distAudioPath)
+          synthesizer.close()
+          resolve()
+        } else {
+          synthesizer.close()
+          reject(new Error(result.errorDetails))
+        }
+      },
+      (error) => {
+        synthesizer.close()
+        reject(error)
+      }
+    )
   })
 }
 

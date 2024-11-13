@@ -6,6 +6,15 @@ import { getConfig } from '@/lib/config.js'
 import { applyAudiosToVideo, converWavToMp3, cutVideo, decutVideo, extractAudio } from '@/lib/editor.js'
 import { elevenlabs } from '@/lib/elevenlabs.js'
 import { removeVideosAndAudios } from '@/lib/fs.js'
+import {
+  generateStoryAndPicturesTexts,
+  generateStoryAudio,
+  generateStoryAudioParts,
+  generateStoryDescription,
+  generateStoryPictures,
+  generateStoryTitle,
+  generateStoryVideoByPictures,
+} from '@/lib/gentube.js'
 import { googleDrive } from '@/lib/googledrive.js'
 import { kinescope } from '@/lib/kinescope.js'
 import { loom } from '@/lib/loom.js'
@@ -1259,6 +1268,275 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
 
+    case 'story-text-pictures':
+    case 'stp': {
+      const { characterFilePath, worldFilePath, storyTemplateFilePath, storyFilePath, picturesTextFilePath } = z
+        .object({
+          characterFilePath: z.string().min(1),
+          worldFilePath: z.string().min(1),
+          storyTemplateFilePath: z.string().min(1),
+          storyFilePath: z.string().min(1),
+          picturesTextFilePath: z.string().min(1),
+          cont: z.boolean().optional(),
+        })
+        .parse({
+          characterFilePath: getFlagAsString({
+            flags,
+            keys: ['character', 'c'],
+            coalesce: undefined,
+          }),
+          worldFilePath: getFlagAsString({
+            flags,
+            keys: ['world', 'w'],
+            coalesce: undefined,
+          }),
+          storyTemplateFilePath: getFlagAsString({
+            flags,
+            keys: ['story-template', 't'],
+            coalesce: undefined,
+          }),
+          storyFilePath: getFlagAsString({
+            flags,
+            keys: ['story', 's'],
+            coalesce: undefined,
+          }),
+          picturesTextFilePath: getFlagAsString({
+            flags,
+            keys: ['pictures', 'p'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await generateStoryAndPicturesTexts({
+        config,
+        characterFilePath,
+        worldFilePath,
+        storyTemplateFilePath,
+        storyFilePath,
+        picturesTextFilePath,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-pictures':
+    case 'sp': {
+      const { picturesTextFilePath, pictureTemplateFilePath, picturesDirPath, cont } = z
+        .object({
+          picturesTextFilePath: z.string().min(1),
+          pictureTemplateFilePath: z.string().min(1),
+          picturesDirPath: z.string().min(1),
+          cont: z.boolean().optional(),
+        })
+        .parse({
+          picturesTextFilePath: getFlagAsString({
+            flags,
+            keys: ['pictures-text', 'p'],
+            coalesce: undefined,
+          }),
+          pictureTemplateFilePath: getFlagAsString({
+            flags,
+            keys: ['picture-template', 't'],
+            coalesce: undefined,
+          }),
+          picturesDirPath: getFlagAsString({
+            flags,
+            keys: ['output', 'o'],
+            coalesce: undefined,
+          }),
+          cont: getFlagAsBoolean({
+            flags,
+            keys: ['cont'],
+            coalesce: false,
+          }),
+        })
+      const result = await generateStoryPictures({
+        config,
+        picturesTextFilePath,
+        pictureTemplateFilePath,
+        picturesDirPath,
+        cont,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-audio-parts':
+    case 'sap': {
+      const { storyFilePath, audioPartsDirPath, lang, cont } = z
+        .object({
+          lang: zLangProcessed,
+          storyFilePath: z.string().min(1),
+          audioPartsDirPath: z.string().min(1),
+          cont: z.boolean().optional(),
+        })
+        .parse({
+          lang: getFlagAsString({
+            flags,
+            keys: ['lang', 'l'],
+            coalesce: undefined,
+          }),
+          storyFilePath: getFlagAsString({
+            flags,
+            keys: ['story', 's'],
+            coalesce: undefined,
+          }),
+          audioPartsDirPath: getFlagAsString({
+            flags,
+            keys: ['output', 'o'],
+            coalesce: undefined,
+          }),
+          cont: getFlagAsBoolean({
+            flags,
+            keys: ['cont'],
+            coalesce: false,
+          }),
+        })
+      const result = await generateStoryAudioParts({
+        config,
+        storyFilePath,
+        audioPartsDirPath,
+        lang,
+        cont,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-audio-full':
+    case 'saf': {
+      const { audioFilePath, audioPartsDirPath } = z
+        .object({
+          audioFilePath: z.string().min(1),
+          audioPartsDirPath: z.string().min(1),
+          cont: z.boolean().optional(),
+        })
+        .parse({
+          audioFilePath: getFlagAsString({
+            flags,
+            keys: ['output', 'o'],
+            coalesce: undefined,
+          }),
+          audioPartsDirPath: getFlagAsString({
+            flags,
+            keys: ['audios-parts-dir', 'd'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await generateStoryAudio({
+        config,
+        audioFilePath,
+        audioPartsDirPath,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-pictures-video':
+    case 'spv': {
+      const { videoFilePath, picturesDirPath, audioPartsDirPath } = z
+        .object({
+          videoFilePath: z.string().min(1),
+          picturesDirPath: z.string().min(1),
+          audioPartsDirPath: z.string().min(1),
+          cont: z.boolean().optional(),
+        })
+        .parse({
+          videoFilePath: getFlagAsString({
+            flags,
+            keys: ['output', 'o'],
+            coalesce: undefined,
+          }),
+          picturesDirPath: getFlagAsString({
+            flags,
+            keys: ['pictures-dir', 'p'],
+            coalesce: undefined,
+          }),
+          audioPartsDirPath: getFlagAsString({
+            flags,
+            keys: ['audios-parts-dir', 'a'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await generateStoryVideoByPictures({
+        config,
+        videoFilePath,
+        picturesDirPath,
+        audioPartsDirPath,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-title':
+    case 'st': {
+      const { storyFilePath, titleFilePath } = z
+        .object({
+          storyFilePath: z.string().min(1),
+          titleFilePath: z.string().min(1),
+        })
+        .parse({
+          titleFilePath: getFlagAsString({
+            flags,
+            keys: ['output', 'o'],
+            coalesce: undefined,
+          }),
+          storyFilePath: getFlagAsString({
+            flags,
+            keys: ['story', 's'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await generateStoryTitle({
+        config,
+        storyFilePath,
+        titleFilePath,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-description':
+    case 'sd': {
+      const { storyFilePath, descriptionFilePath } = z
+        .object({
+          storyFilePath: z.string().min(1),
+          descriptionFilePath: z.string().min(1),
+        })
+        .parse({
+          descriptionFilePath: getFlagAsString({
+            flags,
+            keys: ['output', 'o'],
+            coalesce: undefined,
+          }),
+          storyFilePath: getFlagAsString({
+            flags,
+            keys: ['story', 's'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await generateStoryDescription({
+        config,
+        storyFilePath,
+        descriptionFilePath,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
     case 'clear': {
       const dirPath = args[0] || config.contentDir
       const result = await removeVideosAndAudios({ dirPath })
@@ -1306,7 +1584,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         uy | upload-to-youtube --title <title> <filePath>
         dy | download-from-youtube -u <url> -f <filePath>
 
-        boom <loomPublicUrl> --src-lang <srcLang> --dist-langs <distLangs>
+        boom <loomPublicUrl> --src-lang <srcLang> --dist-langs <distLangs> (overhead)
+        bam <filePath> <distLangs> (just dub)
+
+        st | story-text --character(c) --world(w) --story-template(t) --output(o)
+        si | story-images --story(s)
 
         esr | extract-srt-revai <filePath> --lang <lang> --translated-langs <translatedLangs>
         (deprecated) esa | extract-srt-azureai <filePath> --lang <lang>

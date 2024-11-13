@@ -1,6 +1,7 @@
 import type { Config } from '@/lib/config.js'
 import { getEnv } from '@/lib/env.js'
 import { parseFileName } from '@/lib/meta.js'
+import { downloadFile } from '@/lib/network.js'
 import { wait } from '@/lib/utils.js'
 import { promises as fs } from 'fs'
 import _ from 'lodash'
@@ -28,11 +29,13 @@ export const completionByOpenai = async <T>({
   userPrompt,
   jsonSchema,
   zodSchema,
+  model = 'gpt-4o',
 }: {
   systemPrompt?: string
   userPrompt: string
   jsonSchema?: any
   zodSchema?: z.ZodType<any, any>
+  model?: 'gpt-4o' | 'o1-preview'
 }): Promise<T> => {
   const { openai } = getOpenaiClient()
   const chatMessages: ChatCompletionMessageParam[] = [
@@ -41,7 +44,7 @@ export const completionByOpenai = async <T>({
   ]
   const res = await openai.chat.completions.create({
     messages: chatMessages,
-    model: 'gpt-4o',
+    model,
     ...(!jsonSchema
       ? {}
       : {
@@ -86,6 +89,136 @@ export const completionByOpenai = async <T>({
       throw new Error('OpenAI response not found')
     }
     return responseText as T
+  }
+}
+
+export const imageByOpenai = async ({
+  config,
+  prompt,
+  attemptIndex = 0,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  retryReason = null,
+  imageFilePath,
+  verbose,
+}: {
+  config: Config
+  prompt: string
+  imageFilePath: string
+  attemptIndex?: number
+  retryReason?: string | null
+  verbose?: boolean
+}): Promise<{
+  imageFilePath: string
+}> => {
+  imageFilePath = path.resolve(config.contentDir, imageFilePath)
+  try {
+    const { openai } = getOpenaiClient()
+    const res = await openai.images.generate({
+      model: 'dall-e-3',
+      quality: 'hd',
+      prompt,
+      size: '1792x1024',
+      n: 1,
+      response_format: 'url',
+    })
+    const imagesUrlsOpenAi = res.data.map((item) => item.url).filter(Boolean) as string[]
+    if (!imagesUrlsOpenAi?.length) {
+      throw new Error('No images')
+    }
+    await downloadFile({ fileUrl: imagesUrlsOpenAi[0], filePath: imageFilePath })
+
+    return {
+      imageFilePath,
+    }
+  } catch (error: any) {
+    verbose && log.red('imageByOpenai Error', error.message)
+    // eslint-disable-next-line no-useless-catch
+    try {
+      if (error?.response?.data) {
+        const responseData = error?.response?.data
+        const responseStatus: number = error?.response?.status || 0
+        const responseCode: number = responseData?.error?.code || 0
+        const errorReasonByStatus = {
+          401: 'weAreUnauthorized' as const,
+          429: 'weAreOutOfRequests' as const,
+          503: 'openaiOverloaded' as const,
+        }[responseStatus]
+        const errorReasonByCode = {
+          model_not_found: 'modelNotFound' as const,
+          content_policy_violation: 'contentPolicyViolation' as const,
+        }[responseCode]
+        const errorReason = errorReasonByCode || errorReasonByStatus || 'unknown'
+        // const originalErrorMessage = responseData.error?.message || 'Unknown axios error'
+        const normalizedError = new Error('Unknown axios error')
+
+        if (errorReason === 'contentPolicyViolation') {
+          if (attemptIndex >= 6) {
+            // so we tried 7 times
+            throw normalizedError
+          }
+          const newPrompt = await completionByOpenai<string>({
+            systemPrompt:
+              'Act as a opani dall-e prompt generator. User will provide you with a prompt, which was rejected by OpenAI DALL-E due to content policy violation. You should generate a new prompt, which will be accepted by OpenAI DALL-E. Reply with the new prompt only.',
+            userPrompt: `${prompt}`,
+          })
+          verbose && log.normal('New prompt', newPrompt)
+          return await imageByOpenai({
+            config,
+            prompt: newPrompt,
+            imageFilePath,
+            attemptIndex: attemptIndex + 1,
+            retryReason: errorReason,
+            verbose,
+          })
+        }
+
+        if (errorReason === 'weAreUnauthorized') {
+          throw normalizedError
+        }
+
+        if (errorReason === 'weAreOutOfRequests') {
+          if (attemptIndex >= 6) {
+            // so we tried 7 times
+            throw normalizedError
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5_000))
+          return await imageByOpenai({
+            config,
+            prompt,
+            imageFilePath,
+            attemptIndex: attemptIndex + 1,
+            retryReason: errorReason,
+            verbose,
+          })
+        }
+
+        if (errorReason === 'modelNotFound') {
+          throw normalizedError
+        }
+
+        if (errorReason === 'openaiOverloaded') {
+          if (attemptIndex >= 2) {
+            // so we tried 3 times
+            throw normalizedError
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5_000))
+
+          return await imageByOpenai({
+            config,
+            prompt,
+            imageFilePath,
+            attemptIndex: attemptIndex + 1,
+            retryReason: errorReason,
+            verbose,
+          })
+        }
+
+        throw normalizedError
+      }
+      throw error
+    } catch (error: any) {
+      throw error
+    }
   }
 }
 
@@ -202,6 +335,7 @@ export const translateSrtByOpenai = async ({
   force?: boolean
 }) => {
   verbose && log.normal('Translating srt', { srcSrtPath, distLang })
+  srcSrtPath = path.resolve(config.contentDir, srcSrtPath)
   const parsed = parseFileName(srcSrtPath)
   if (parsed.ext !== 'srt') {
     throw new Error('Only srt files are allowed')

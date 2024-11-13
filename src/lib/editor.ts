@@ -7,6 +7,7 @@ import ffmpeg from 'fluent-ffmpeg'
 import { promises as fs } from 'fs'
 import langCodesLib from 'langs'
 import path from 'path'
+import sharp from 'sharp'
 import { isFileExistsSync, log, spawn } from 'svag-cli-utils'
 
 export const extractAudioSimple = async ({
@@ -47,9 +48,10 @@ export const extractAudio = async ({
   verbose?: boolean
 }) => {
   verbose && log.normal('Extracting audio', { filePath, lang })
+  filePath = path.resolve(config.contentDir, filePath)
   const parsed = parseFileName(filePath)
   const audioFileName = `${parsed.name}.${lang}.mp3`
-  const audioFilePath = path.resolve(config.contentDir, audioFileName)
+  const audioFilePath = path.resolve(parsed.dirname, audioFileName)
   const { fileExists } = isFileExistsSync({ filePath: audioFilePath })
   if (fileExists && !force) {
     verbose && log.normal('Audio file already exists', { audioFilePath })
@@ -104,18 +106,19 @@ export const applyAudiosToVideo = async ({
   verbose?: boolean
 }) => {
   verbose && log.normal('Applying audios to video', { inputVideoPath, langs })
+  inputVideoPath = path.resolve(config.contentDir, inputVideoPath)
   const parsed = parseFileName(inputVideoPath)
   if (langs.length === 0) {
     throw new Error('No languages provided')
   }
   const outputVideoMarks = [...parsed.notLangMarks, ...langs]
   const outputVideoFileName = `${parsed.name}.${outputVideoMarks.join('.')}.mp4`
-  const outputVideoPath = path.resolve(config.contentDir, outputVideoFileName)
+  const outputVideoPath = path.resolve(parsed.dirname, outputVideoFileName)
   const inputAudios: Array<{ lang: string; audioPath: string }> = []
   for (const lang of langs) {
     const langProcessed = fromRawLang(lang)
     const audioFileName = `${parsed.name}.${langProcessed}.mp3`
-    const audioFilePath = path.resolve(config.contentDir, audioFileName)
+    const audioFilePath = path.resolve(parsed.dirname, audioFileName)
     const { fileExists } = isFileExistsSync({ filePath: audioFilePath })
     if (!fileExists) {
       throw new Error(`Audio file not found: ${audioFilePath}`)
@@ -492,5 +495,90 @@ export const concatAudios = async ({
   return {
     audioPaths,
     outputAudioPath,
+  }
+}
+
+// Utility function to get image dimensions
+export const getImageDimensions = async ({ imagePath }: { imagePath: string }) => {
+  const metadata = await sharp(imagePath).metadata()
+  if (!metadata.width || !metadata.height) {
+    throw new Error(`Unable to retrieve dimensions for image: ${imagePath}`)
+  }
+  return { width: metadata.width, height: metadata.height }
+}
+
+export const concatImagesToVideo = async ({
+  imagesPaths,
+  durationsMs,
+  outputVideoPath,
+  verbose,
+}: {
+  imagesPaths: string[]
+  durationsMs: number[]
+  outputVideoPath: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Concatenating images to video', { imagesPaths, outputVideoPath })
+
+  if (imagesPaths.length !== durationsMs.length) {
+    throw new Error('Images and durations must have the same length')
+  }
+
+  if (imagesPaths.length === 0) {
+    throw new Error('No images provided for video creation')
+  }
+
+  // Get the resolution of the first image
+  const { width, height } = await getImageDimensions({ imagePath: imagesPaths[0] })
+
+  // Build ffmpeg input arguments
+  const inputArgs = imagesPaths.flatMap((imagePath, index) => {
+    const duration = durationsMs[index] / 1_000 // Convert ms to seconds
+    return ['-loop', '1', '-t', `${duration}`, '-i', `"${imagePath}"`]
+  })
+
+  // Construct the filter_complex for concatenation
+  let filterComplex = ''
+  const totalInputs = imagesPaths.length
+  for (let i = 0; i < totalInputs; i++) {
+    filterComplex += `[${i}:v]scale=${width}:${height},setsar=1[v${i}];`
+  }
+
+  // Concatenate all scaled inputs
+  const concatInputs = Array.from({ length: totalInputs }, (_, i) => `[v${i}]`).join('')
+  filterComplex += `${concatInputs}concat=n=${totalInputs}:v=1:a=0,format=yuv420p[v]`
+
+  // Final ffmpeg command arguments
+  const ffmpegArgs = [
+    ...inputArgs,
+    '-filter_complex',
+    `"${filterComplex}"`,
+    '-map',
+    '"[v]"',
+    '-c:v',
+    'libx264',
+    '-crf',
+    '18', // Adjust CRF for quality (lower is better)
+    '-preset',
+    'veryslow', // Adjust preset for encoding speed vs compression
+    '-r',
+    '25', // Frames per second
+    '-y',
+    `"${outputVideoPath}"`,
+  ]
+
+  // Join arguments into a single command string
+  const nativeCommand = `ffmpeg ${ffmpegArgs.join(' ')}`
+
+  verbose && log.normal('Executing ffmpeg command:', nativeCommand)
+
+  // Execute the ffmpeg command
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+
+  verbose && log.normal('Concatenated images to video', { imagesPaths, outputVideoPath })
+
+  return {
+    imagesPaths,
+    outputVideoPath,
   }
 }
