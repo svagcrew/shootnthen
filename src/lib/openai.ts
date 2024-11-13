@@ -114,6 +114,11 @@ const translateFewStringByOpenai = async ({
   const langsNames = {
     en: 'English',
     ru: 'Russian',
+    es: 'Spanish',
+    pt: 'Portuguese',
+    it: 'Italian',
+    de: 'German',
+    tr: 'Turkish',
   }
   const srcLangName = (langsNames as any)[srcLang] as string
   const distLangName = (langsNames as any)[distLang] as string

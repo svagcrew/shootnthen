@@ -1166,25 +1166,35 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         break
       }
       const srcLangRaw = parsedFilePath.langSingle
-      const { filePath, srcLang, distLangs } = z
+      const srcSrtFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.srt`)
+      const srcAudioFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.mp3`)
+      const { filePath, srcLang, distLangs, skipSrcCommands } = z
         .object({
+          skipSrcCommands: z.boolean().default(false),
           filePath: z.string().min(1),
           distLangs: z.array(zLangProcessed).min(1),
           srcLang: zLangProcessed,
         })
         .parse({
+          skipSrcCommands: getFlagAsBoolean({
+            flags,
+            keys: ['skip-src-commands', 's'],
+            coalesce: false,
+          }),
           filePath: filePathRaw,
           distLangs: args[1]?.split(',') || [],
           srcLang: srcLangRaw,
         })
 
       let lastCommandIndex = -1
-      const commands = [
-        // snt ea zxc.ru.mp4 -l ru
-        `snt ea ${parsedFilePath.basename} -l ${srcLang}`,
-        // snt esr zxc.ru.mp3 -l ru
-        `snt esr ${parsedFilePath.name}.${srcLang}.mp3 -l ${srcLang}`,
-      ]
+      const commands = skipSrcCommands
+        ? []
+        : [
+            // snt ea zxc.ru.mp4 -l ru
+            `snt ea ${parsedFilePath.basename} -l ${srcLang}`,
+            // snt esr zxc.ru.mp3 -l ru
+            `snt esr ${parsedFilePath.name}.${srcLang}.mp3 -l ${srcLang}`,
+          ]
       for (const distLang of distLangs) {
         // snt ts zxc.ru.srt --dl en
         commands.push(`snt ts ${parsedFilePath.name}.${srcLang}.srt --dl ${distLang}`)
@@ -1197,23 +1207,25 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       }
       log.green('Commands:', ...commands)
       try {
-        lastCommandIndex++
-        const { audioFilePath: srcAudioFilePath } = await extractAudio({
-          config,
-          filePath: args[0],
-          lang: srcLang,
-          verbose,
-          force,
-        })
-        lastCommandIndex++
-        const { srtFilePath: srcSrtFilePath } = await extractSrtByRevai({
-          config,
-          lang: srcLang,
-          verbose,
-          filePath: srcAudioFilePath,
-          translatedLangs: [],
-          force,
-        })
+        if (!skipSrcCommands) {
+          lastCommandIndex++
+          const { audioFilePath: srcAudioFilePath } = await extractAudio({
+            config,
+            filePath: args[0],
+            lang: srcLang,
+            verbose,
+            force,
+          })
+          lastCommandIndex++
+          const { srtFilePath: srcSrtFilePath } = await extractSrtByRevai({
+            config,
+            lang: srcLang,
+            verbose,
+            filePath: srcAudioFilePath,
+            translatedLangs: [],
+            force,
+          })
+        }
         for (const distLang of distLangs) {
           lastCommandIndex++
           const { distSrtPath } = await translateSrtByOpenai({

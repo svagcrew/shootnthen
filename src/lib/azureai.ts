@@ -742,9 +742,22 @@ export const ttsSimpleByAzureai = async ({
   // Map language codes to voice names
   const voiceMap: { [key: string]: string } = {
     en: 'en-US-AndrewMultilingualNeural',
-    // ru: 'ru-RU-SvetlanaNeural',
-    // Add more mappings as needed
+    ru: 'ru-RU-DmitryNeural',
+    es: 'es-ES-AlvaroNeural',
+    pt: 'pt-BR-AntonioNeural',
+    it: 'it-IT-DiegoNeural',
+    de: 'de-DE-ConradNeural',
+    tr: 'tr-TR-AhmetNeural',
   }
+  // const voiceMapFemale: { [key: string]: string } = {
+  //   en: 'en-US-AvaMultilingualNeural',
+  //   ru: 'ru-RU-SvetlanaNeural',
+  //   es: 'es-ES-ElviraNeural',
+  //   pt: 'pt-BR-FranciscaNeural',
+  //   it: 'it-IT-ElsaNeural',
+  //   de: 'de-DE-KatjaNeural',
+  //   tr: 'tr-TR-EmelNeural',
+  // }
   const voiceName = voiceMap[lang] || 'en-US-AriaNeural' // default voice if language not found
 
   // Read and parse the SRT file
