@@ -3,7 +3,10 @@ import type { Config } from '@/exports.js'
 import { ttsMegasimpleByAzureai } from '@/lib/azureai.js'
 import { concatAudios, concatImagesToVideo, getAudioDuration } from '@/lib/editor.js'
 import { completionByOpenai, imageByOpenai } from '@/lib/openai.js'
+import { youtube } from '@/lib/youtube.js'
 import { promises as fs } from 'fs'
+import Handlebars from 'handlebars'
+import _ from 'lodash'
 import path from 'path'
 import { isDirExists, isFileExists, log } from 'svag-cli-utils'
 
@@ -12,9 +15,56 @@ export const parseCharacterFile = async ({ characterFilePath }: { characterFileP
   return { characterFileContent }
 }
 
-export const parseStoryTemplateFile = async ({ storyTemplateFilePath }: { storyTemplateFilePath: string }) => {
-  const storyTemplateFileContent = await fs.readFile(storyTemplateFilePath, 'utf-8')
-  return { storyTemplateFileContent }
+export const parseStoryTemplateFile = async ({
+  storyTemplateFilePath,
+  itemsFilePath,
+}: {
+  storyTemplateFilePath: string
+  itemsFilePath?: string
+}) => {
+  const storyTemplateFileContentRaw = await fs.readFile(storyTemplateFilePath, 'utf-8')
+  if (!itemsFilePath) {
+    return { storyTemplateFileContent: storyTemplateFileContentRaw }
+  } else {
+    const itemsData: {
+      pickIndex?: number[]
+      pickCount?: number
+      pickMatch?: Array<Record<string, any>>
+      items: Array<Record<string, any>>
+    } = JSON.parse(await fs.readFile(itemsFilePath, 'utf-8'))
+    const items = (() => {
+      if (itemsData.pickMatch) {
+        const itemsHere: typeof itemsData.items = []
+        for (const pickMatchItem of itemsData.pickMatch) {
+          const item = itemsData.items.find((item) => {
+            return _.matches(pickMatchItem)(item)
+          })
+          if (!item) {
+            throw new Error(`Item not found: ${JSON.stringify(pickMatchItem)}`)
+          }
+          itemsHere.push(item)
+        }
+        return itemsHere
+      } else if (itemsData.pickIndex) {
+        const itemsHere: typeof itemsData.items = itemsData.pickIndex
+          .map((index) => {
+            return itemsData.items[index]
+          })
+          .filter(Boolean)
+        if (itemsHere.length !== itemsData.pickIndex.length) {
+          throw new Error(`Invalid items data: pickIndex not found ${itemsData.pickIndex}`)
+        }
+        return itemsHere
+      } else if (itemsData.pickCount) {
+        return _.sampleSize(itemsData.items, itemsData.pickCount)
+      } else {
+        throw new Error('Invalid items data: pickCount not found and pickMatch not found')
+      }
+    })()
+    const template = Handlebars.compile(storyTemplateFileContentRaw)
+    const storyTemplateFileContent = template({ items })
+    return { storyTemplateFileContent }
+  }
 }
 
 export const parseWorldFile = async ({ worldFilePath }: { worldFilePath: string }) => {
@@ -68,10 +118,17 @@ export const generateStoryTitle = async ({
   const systemPrompt = `Act as youtube video title generator and generate a title for the story. Reply with a single sentence that would make a compelling title for a video based on the story. User will provide the story text.`
   const userPrompt = storyFileContent
   verbose && log.normal('Generating story title')
-  const result: string = await completionByOpenai({
+  const resultRaw: string = await completionByOpenai({
     userPrompt,
     systemPrompt,
   })
+  const result = (() => {
+    if (resultRaw.startsWith('"') && resultRaw.endsWith('"')) {
+      return resultRaw.slice(1, -1)
+    } else {
+      return resultRaw
+    }
+  })()
   await fs.writeFile(titleFilePath, result)
   return { titleFilePath }
 }
@@ -116,22 +173,24 @@ export const generateStoryAndPicturesTexts = async ({
   characterFilePath,
   worldFilePath,
   storyTemplateFilePath,
+  itemsFilePath,
   storyFilePath,
   picturesTextFilePath,
   verbose,
   force,
 }: {
   config: Config
-  characterFilePath: string
-  worldFilePath: string
+  characterFilePath?: string
+  worldFilePath?: string
   storyTemplateFilePath: string
+  itemsFilePath?: string
   storyFilePath: string
   picturesTextFilePath: string
   verbose?: boolean
   force?: boolean
 }) => {
-  characterFilePath = path.resolve(config.contentDir, characterFilePath)
-  worldFilePath = path.resolve(config.contentDir, worldFilePath)
+  characterFilePath = characterFilePath && path.resolve(config.contentDir, characterFilePath)
+  worldFilePath = worldFilePath && path.resolve(config.contentDir, worldFilePath)
   storyTemplateFilePath = path.resolve(config.contentDir, storyTemplateFilePath)
   storyFilePath = path.resolve(config.contentDir, storyFilePath)
   picturesTextFilePath = path.resolve(config.contentDir, picturesTextFilePath)
@@ -146,14 +205,18 @@ export const generateStoryAndPicturesTexts = async ({
     throw new Error(`Pictures file already exists: ${picturesTextFilePath}`)
   }
   const userPromptParts: string[] = []
-  const { characterFileContent } = await parseCharacterFile({ characterFilePath })
-  const { worldFileContent } = await parseWorldFile({ worldFilePath })
-  const { storyTemplateFileContent } = await parseStoryTemplateFile({ storyTemplateFilePath })
-  userPromptParts.push(`===============
+  const { characterFileContent } = characterFilePath
+    ? await parseCharacterFile({ characterFilePath })
+    : { characterFileContent: null }
+  const { worldFileContent } = worldFilePath ? await parseWorldFile({ worldFilePath }) : { worldFileContent: null }
+  const { storyTemplateFileContent } = await parseStoryTemplateFile({ storyTemplateFilePath, itemsFilePath })
+  characterFileContent &&
+    userPromptParts.push(`===============
 Character
 ===============
 ${characterFileContent}`)
-  userPromptParts.push(`===============
+  worldFileContent &&
+    userPromptParts.push(`===============
 World
 ===============
 ${worldFileContent}`)
@@ -162,9 +225,9 @@ Story Template
 ===============
 ${storyTemplateFileContent}`)
   const userPrompt = userPromptParts.join('\n\n\n')
-  const systemPrompt = `Act as a professional storyteller and craft a dynamic story based on the provided characters, world setting, and story template. Expand each section of the story template into multiple short paragraphs. Do not include any titles, scene headings, or extra metadata—only the story text. Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line. This will allow for frequent image changes in the video. Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.
+  const systemPrompt = `Act as a professional storyteller and craft a dynamic story based on the provided information. Expand each section of the story template into multiple short paragraphs. Do not include any titles, scene headings, or extra metadata—only the story text. Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line. This will allow for frequent image changes in the video. Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.
 After each paragraph provide additional paragraph started with text "Illustrate: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e. So illustration should not violate any rules of openai dall-e.`
-  verbose && log.normal('Generating story text')
+  verbose && log.normal('Generating story and pictures text', { storyFilePath }, systemPrompt, userPrompt)
   const result: string = await completionByOpenai({
     userPrompt,
     systemPrompt,
@@ -177,6 +240,7 @@ After each paragraph provide additional paragraph started with text "Illustrate:
   await fs.writeFile(storyFilePath, storyFileContent)
   await fs.writeFile(picturesTextFilePath, picturesFileContent)
   if (storyParagraphs.length !== picturesParagraphs.length) {
+    await fs.writeFile(storyFilePath + '.error', result)
     throw new Error('Number of story paragraphs and pictures paragraphs should be equal')
   }
   return { storyFilePath, picturesTextFilePath }
@@ -387,4 +451,53 @@ export const generateStoryVideoByPictures = async ({
   return {
     audioPartFilePaths: picturesPaths,
   }
+}
+
+export const uploadStoryToYoutube = async ({
+  storyTitleFilePath,
+  storyDescriptionFilePath,
+  videoFilePath,
+  playlistId,
+  config,
+  verbose,
+  force,
+}: {
+  storyTitleFilePath: string
+  storyDescriptionFilePath: string
+  videoFilePath: string
+  playlistId?: string
+  config: Config
+  verbose?: boolean
+  force?: boolean
+}) => {
+  storyTitleFilePath = path.resolve(config.contentDir, storyTitleFilePath)
+  storyDescriptionFilePath = path.resolve(config.contentDir, storyDescriptionFilePath)
+  videoFilePath = path.resolve(config.contentDir, videoFilePath)
+  const { fileExists: storyTitleFileExists } = await isFileExists({ filePath: storyTitleFilePath })
+  if (!storyTitleFileExists) {
+    throw new Error(`Story title file does not exist: ${storyTitleFilePath}`)
+  }
+  const { fileExists: storyDescriptionFileExists } = await isFileExists({ filePath: storyDescriptionFilePath })
+  if (!storyDescriptionFileExists) {
+    throw new Error(`Story description file does not exist: ${storyDescriptionFilePath}`)
+  }
+  const { fileExists: videoFileExists } = await isFileExists({ filePath: videoFilePath })
+  if (!videoFileExists) {
+    throw new Error(`Video file does not exist: ${videoFilePath}`)
+  }
+  const title = await fs.readFile(storyTitleFilePath, 'utf-8')
+  const description = await fs.readFile(storyDescriptionFilePath, 'utf-8')
+  playlistId = playlistId || config.youtubePlaylistId || undefined
+  verbose && log.normal('Uploading story to youtube', { videoFilePath, title, description, playlistId })
+  const result = await youtube.uploadFile({
+    config,
+    title,
+    description,
+    playlistId,
+    filePath: videoFilePath,
+    verbose,
+    force,
+    privacyStatus: 'public',
+  })
+  return result
 }

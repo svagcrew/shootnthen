@@ -12,7 +12,10 @@ export const getGoogleAuthClient = async ({
 }): Promise<{
   authClient: any
 }> => {
-  const SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/youtube']
+  const SCOPES = config.googleScopes || [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/youtube',
+  ]
 
   const loadSavedCredentialsIfExist = async () => {
     try {

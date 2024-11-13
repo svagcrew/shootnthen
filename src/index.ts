@@ -14,6 +14,7 @@ import {
   generateStoryPictures,
   generateStoryTitle,
   generateStoryVideoByPictures,
+  uploadStoryToYoutube,
 } from '@/lib/gentube.js'
 import { googleDrive } from '@/lib/googledrive.js'
 import { kinescope } from '@/lib/kinescope.js'
@@ -756,22 +757,45 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
     case 'upload-to-youtube':
     case 'uy': {
-      const filePathRaw = args[0]
-      const titleRaw = getFlagAsString({
-        flags,
-        keys: ['title', 't'],
-        coalesce: undefined,
-      })
-      const { title, filePath } = z
+      const { title, filePath, playlistId, privacyStatus } = z
         .object({
           title: z.string().optional(),
+          description: z.string().optional(),
+          playlistId: z.string().optional(),
+          privacyStatus: z.enum(['private', 'public']),
           filePath: z.string(),
         })
         .parse({
-          title: titleRaw,
-          filePath: filePathRaw,
+          title: getFlagAsString({
+            flags,
+            keys: ['title', 't'],
+            coalesce: undefined,
+          }),
+          description: getFlagAsString({
+            flags,
+            keys: ['description', 'd'],
+            coalesce: '',
+          }),
+          playlistId: getFlagAsString({
+            flags,
+            keys: ['playlist', 'p'],
+            coalesce: undefined,
+          }),
+          privacyStatus: getFlagAsString({
+            flags,
+            keys: ['privacy-status', 's'],
+            coalesce: 'private',
+          }),
+          filePath: args[0],
         })
-      const result = await youtube.uploadFile({ config, title, filePath, verbose })
+      const result = await youtube.uploadFile({
+        config,
+        title,
+        playlistId,
+        privacyStatus,
+        filePath,
+        verbose,
+      })
       log.green(result)
       break
     }
@@ -1270,11 +1294,19 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
     case 'story-text-pictures':
     case 'stp': {
-      const { characterFilePath, worldFilePath, storyTemplateFilePath, storyFilePath, picturesTextFilePath } = z
+      const {
+        characterFilePath,
+        worldFilePath,
+        storyTemplateFilePath,
+        itemsFilePath,
+        storyFilePath,
+        picturesTextFilePath,
+      } = z
         .object({
-          characterFilePath: z.string().min(1),
-          worldFilePath: z.string().min(1),
+          characterFilePath: z.string().optional(),
+          worldFilePath: z.string().optional(),
           storyTemplateFilePath: z.string().min(1),
+          itemsFilePath: z.string().optional(),
           storyFilePath: z.string().min(1),
           picturesTextFilePath: z.string().min(1),
           cont: z.boolean().optional(),
@@ -1295,6 +1327,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['story-template', 't'],
             coalesce: undefined,
           }),
+          itemsFilePath: getFlagAsString({
+            flags,
+            keys: ['items', 'i'],
+            coalesce: undefined,
+          }),
           storyFilePath: getFlagAsString({
             flags,
             keys: ['story', 's'],
@@ -1311,6 +1348,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         characterFilePath,
         worldFilePath,
         storyTemplateFilePath,
+        itemsFilePath,
         storyFilePath,
         picturesTextFilePath,
         verbose,
@@ -1530,6 +1568,50 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         config,
         storyFilePath,
         descriptionFilePath,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-youtube-upload':
+    case 'syu': {
+      const { storyTitleFilePath, storyDescriptionFilePath, videoFilePath, playlistId } = z
+        .object({
+          videoFilePath: z.string().min(1),
+          storyTitleFilePath: z.string().min(1),
+          storyDescriptionFilePath: z.string().min(1),
+          playlistId: z.string().optional(),
+        })
+        .parse({
+          videoFilePath: getFlagAsString({
+            flags,
+            keys: ['video', 'v'],
+            coalesce: undefined,
+          }),
+          storyTitleFilePath: getFlagAsString({
+            flags,
+            keys: ['title', 't'],
+            coalesce: undefined,
+          }),
+          storyDescriptionFilePath: getFlagAsString({
+            flags,
+            keys: ['description', 'd'],
+            coalesce: undefined,
+          }),
+          playlistId: getFlagAsString({
+            flags,
+            keys: ['playlist', 'p'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await uploadStoryToYoutube({
+        config,
+        storyDescriptionFilePath,
+        storyTitleFilePath,
+        videoFilePath,
+        playlistId,
         verbose,
         force,
       })

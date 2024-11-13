@@ -134,88 +134,89 @@ export const imageByOpenai = async ({
     verbose && log.red('imageByOpenai Error', error.message)
     // eslint-disable-next-line no-useless-catch
     try {
-      if (error?.response?.data) {
-        const responseData = error?.response?.data
-        const responseStatus: number = error?.response?.status || 0
-        const responseCode: number = responseData?.error?.code || 0
-        const errorReasonByStatus = {
-          401: 'weAreUnauthorized' as const,
-          429: 'weAreOutOfRequests' as const,
-          503: 'openaiOverloaded' as const,
-        }[responseStatus]
-        const errorReasonByCode = {
-          model_not_found: 'modelNotFound' as const,
-          content_policy_violation: 'contentPolicyViolation' as const,
-        }[responseCode]
-        const errorReason = errorReasonByCode || errorReasonByStatus || 'unknown'
-        // const originalErrorMessage = responseData.error?.message || 'Unknown axios error'
-        const normalizedError = new Error('Unknown axios error')
+      const errorMessage = error?.response?.data?.error?.message || error.message || 'Unknown error'
+      const responseData = error?.response?.data
+      const responseStatus: number = error?.response?.status || error?.status || 0
+      const responseCode: number = responseData?.error?.code || error?.code || 0
+      const errorReasonByStatus = {
+        401: 'weAreUnauthorized' as const,
+        429: 'weAreOutOfRequests' as const,
+        503: 'openaiOverloaded' as const,
+      }[responseStatus]
+      const errorReasonByCode = {
+        model_not_found: 'modelNotFound' as const,
+        content_policy_violation: 'contentPolicyViolation' as const,
+      }[responseCode]
+      const errorReasonByMessage = errorMessage.includes('Your request was rejected as a result of our safety system')
+        ? ('contentPolicyViolation' as const)
+        : null
+      const errorReason = errorReasonByMessage || errorReasonByCode || errorReasonByStatus || 'unknown'
+      // const originalErrorMessage = responseData.error?.message || 'Unknown axios error'
+      const normalizedError = new Error('Unknown axios error')
 
-        if (errorReason === 'contentPolicyViolation') {
-          if (attemptIndex >= 6) {
-            // so we tried 7 times
-            throw normalizedError
-          }
-          const newPrompt = await completionByOpenai<string>({
-            systemPrompt:
-              'Act as a opani dall-e prompt generator. User will provide you with a prompt, which was rejected by OpenAI DALL-E due to content policy violation. You should generate a new prompt, which will be accepted by OpenAI DALL-E. Reply with the new prompt only.',
-            userPrompt: `${prompt}`,
-          })
-          verbose && log.normal('New prompt', newPrompt)
-          return await imageByOpenai({
-            config,
-            prompt: newPrompt,
-            imageFilePath,
-            attemptIndex: attemptIndex + 1,
-            retryReason: errorReason,
-            verbose,
-          })
-        }
-
-        if (errorReason === 'weAreUnauthorized') {
+      if (errorReason === 'contentPolicyViolation') {
+        if (attemptIndex >= 6) {
+          // so we tried 7 times
           throw normalizedError
         }
+        const newPrompt = await completionByOpenai<string>({
+          systemPrompt:
+            'Act as a opani dall-e prompt generator. User will provide you with a prompt, which was rejected by OpenAI DALL-E due to content policy violation. You should generate a new prompt, which will be accepted by OpenAI DALL-E. Reply with the new prompt only.',
+          userPrompt: `${prompt}`,
+        })
+        verbose && log.normal('New prompt', newPrompt)
+        return await imageByOpenai({
+          config,
+          prompt: newPrompt,
+          imageFilePath,
+          attemptIndex: attemptIndex + 1,
+          retryReason: errorReason,
+          verbose,
+        })
+      }
 
-        if (errorReason === 'weAreOutOfRequests') {
-          if (attemptIndex >= 6) {
-            // so we tried 7 times
-            throw normalizedError
-          }
-          await new Promise((resolve) => setTimeout(resolve, 5_000))
-          return await imageByOpenai({
-            config,
-            prompt,
-            imageFilePath,
-            attemptIndex: attemptIndex + 1,
-            retryReason: errorReason,
-            verbose,
-          })
-        }
-
-        if (errorReason === 'modelNotFound') {
-          throw normalizedError
-        }
-
-        if (errorReason === 'openaiOverloaded') {
-          if (attemptIndex >= 2) {
-            // so we tried 3 times
-            throw normalizedError
-          }
-          await new Promise((resolve) => setTimeout(resolve, 5_000))
-
-          return await imageByOpenai({
-            config,
-            prompt,
-            imageFilePath,
-            attemptIndex: attemptIndex + 1,
-            retryReason: errorReason,
-            verbose,
-          })
-        }
-
+      if (errorReason === 'weAreUnauthorized') {
         throw normalizedError
       }
-      throw error
+
+      if (errorReason === 'weAreOutOfRequests') {
+        if (attemptIndex >= 6) {
+          // so we tried 7 times
+          throw normalizedError
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5_000))
+        return await imageByOpenai({
+          config,
+          prompt,
+          imageFilePath,
+          attemptIndex: attemptIndex + 1,
+          retryReason: errorReason,
+          verbose,
+        })
+      }
+
+      if (errorReason === 'modelNotFound') {
+        throw normalizedError
+      }
+
+      if (errorReason === 'openaiOverloaded') {
+        if (attemptIndex >= 2) {
+          // so we tried 3 times
+          throw normalizedError
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5_000))
+
+        return await imageByOpenai({
+          config,
+          prompt,
+          imageFilePath,
+          attemptIndex: attemptIndex + 1,
+          retryReason: errorReason,
+          verbose,
+        })
+      }
+
+      throw normalizedError
     } catch (error: any) {
       throw error
     }
@@ -317,7 +318,6 @@ User will provide you with array of original strings and you should reply with a
 }
 
 export const translateSrtByOpenai = async ({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   config,
   srcSrtPath,
   distSrtPath,

@@ -16,16 +16,24 @@ const getYoutubeClient = async ({ config }: { config: Config }) => {
 const uploadFile = async ({
   config,
   title,
+  description = '',
+  playlistId,
+  privacyStatus,
   filePath,
   force,
   verbose,
 }: {
   config: Config
   title?: string
+  description?: string
+  playlistId?: string
+  privacyStatus?: 'private' | 'public'
   filePath: string
   force?: boolean
   verbose?: boolean
 }) => {
+  playlistId = playlistId || config.youtubePlaylistId || undefined
+  privacyStatus = privacyStatus || config.youtubePrivacyStatus || undefined
   verbose && log.normal('Uploading file to youtube', { filePath })
   const { youtubeClient } = await getYoutubeClient({ config })
   const filePathAbs = path.resolve(config.contentDir, filePath)
@@ -44,18 +52,36 @@ const uploadFile = async ({
     requestBody: {
       snippet: {
         title,
+        description,
       },
       status: {
-        privacyStatus: 'private',
+        privacyStatus,
       },
     },
     media: {
       body: fsync.createReadStream(filePathAbs),
     },
   })
+
   const id = res.data.id
   if (!id) {
     throw new Error('No id after upload')
+  }
+
+  if (playlistId) {
+    await youtubeClient.playlistItems.insert({
+      part: ['snippet'],
+      requestBody: {
+        snippet: {
+          playlistId,
+          resourceId: {
+            kind: 'youtube#video',
+            videoId: id,
+          },
+        },
+      },
+    })
+    verbose && log.normal('Added video to playlist', { playlistId })
   }
   const editUrl = `https://studio.youtube.com/video/${id}/edit`
   const viewUrl = `https://www.youtube.com/watch?v=${id}`

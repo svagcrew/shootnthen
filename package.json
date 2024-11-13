@@ -47,6 +47,7 @@
     "form-data": "^4.0.0",
     "formdata-node": "^6.0.3",
     "googleapis": "^136.0.0",
+    "handlebars": "^4.7.8",
     "langs": "^2.0.0",
     "lodash": "^4.17.21",
     "microsoft-cognitiveservices-speech-sdk": "^1.40.0",
