@@ -1158,6 +1158,95 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
 
+    case 'bam': {
+      const filePathRaw = args[0]
+      const parsedFilePath = parseFileName(filePathRaw)
+      if (parsedFilePath.ext !== 'mp4') {
+        log.red('File is not mp4')
+        break
+      }
+      const srcLangRaw = parsedFilePath.langSingle
+      const { filePath, srcLang, distLangs } = z
+        .object({
+          filePath: z.string().min(1),
+          distLangs: z.array(zLangProcessed).min(1),
+          srcLang: zLangProcessed,
+        })
+        .parse({
+          filePath: filePathRaw,
+          distLangs: args[1]?.split(',') || [],
+          srcLang: srcLangRaw,
+        })
+
+      let lastCommandIndex = -1
+      const commands = [
+        // snt ea zxc.ru.mp4 -l ru
+        `snt ea ${parsedFilePath.basename} -l ${srcLang}`,
+        // snt esr zxc.ru.mp3 -l ru
+        `snt esr ${parsedFilePath.name}.${srcLang}.mp3 -l ${srcLang}`,
+      ]
+      for (const distLang of distLangs) {
+        // snt ts zxc.ru.srt --dl en
+        commands.push(`snt ts ${parsedFilePath.name}.${srcLang}.srt --dl ${distLang}`)
+        // snt tts -s zxc.en.srt -l en -a zxc.ru.mp3
+        commands.push(
+          `snt tts -s ${parsedFilePath.name}.${distLang}.srt -l ${distLang} -a ${parsedFilePath.name}.${srcLang}.mp3`
+        )
+        // snt aa zxc.ru.mp4 -l en
+        commands.push(`snt aa ${parsedFilePath.basename} -l ${distLang}`)
+      }
+      log.green('Commands:', ...commands)
+      try {
+        lastCommandIndex++
+        const { audioFilePath: srcAudioFilePath } = await extractAudio({
+          config,
+          filePath: args[0],
+          lang: srcLang,
+          verbose,
+          force,
+        })
+        lastCommandIndex++
+        const { srtFilePath: srcSrtFilePath } = await extractSrtByRevai({
+          config,
+          lang: srcLang,
+          verbose,
+          filePath: srcAudioFilePath,
+          translatedLangs: [],
+          force,
+        })
+        for (const distLang of distLangs) {
+          lastCommandIndex++
+          const { distSrtPath } = await translateSrtByOpenai({
+            config,
+            srcSrtPath: srcSrtFilePath,
+            srcLang,
+            distLang,
+            verbose,
+            force,
+          })
+          lastCommandIndex++
+          const { audioFilePath: dubbedAudioFilePath } = await ttsByAzureai({
+            force,
+            config,
+            lang: distLang,
+            verbose,
+            srcAudioPath: srcAudioFilePath,
+            srtPath: distSrtPath,
+          })
+          lastCommandIndex++
+          await applyAudiosToVideo({ inputVideoPath: filePath, config, langs: [distLang] })
+        }
+        log.green('Success')
+      } catch (error: any) {
+        // eslint-disable-next-line no-console
+        console.error(error)
+        log.red('Error on command:', commands[lastCommandIndex])
+        const nextCommads = commands.slice(lastCommandIndex)
+        log.red('You should run commands:', ...nextCommads)
+      }
+      break
+    }
+
     case 'clear': {
       const dirPath = args[0] || config.contentDir
       const result = await removeVideosAndAudios({ dirPath })
