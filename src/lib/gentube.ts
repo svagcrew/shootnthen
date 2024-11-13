@@ -10,6 +10,10 @@ import _ from 'lodash'
 import path from 'path'
 import { isDirExists, isFileExists, log } from 'svag-cli-utils'
 
+Handlebars.registerHelper('coalesce', (a, b) => {
+  return a ? a : b
+})
+
 export const parseCharacterFile = async ({ characterFilePath }: { characterFilePath: string }) => {
   const characterFileContent = await fs.readFile(characterFilePath, 'utf-8')
   return { characterFileContent }
@@ -18,9 +22,11 @@ export const parseCharacterFile = async ({ characterFilePath }: { characterFileP
 export const parseStoryTemplateFile = async ({
   storyTemplateFilePath,
   itemsFilePath,
+  pickIndex,
 }: {
   storyTemplateFilePath: string
   itemsFilePath?: string
+  pickIndex?: number[]
 }) => {
   const storyTemplateFileContentRaw = await fs.readFile(storyTemplateFilePath, 'utf-8')
   if (!itemsFilePath) {
@@ -33,7 +39,18 @@ export const parseStoryTemplateFile = async ({
       items: Array<Record<string, any>>
     } = JSON.parse(await fs.readFile(itemsFilePath, 'utf-8'))
     const items = (() => {
-      if (itemsData.pickMatch) {
+      const pickIndexHere = pickIndex || itemsData.pickIndex
+      if (pickIndexHere) {
+        const itemsHere: typeof itemsData.items = pickIndexHere
+          .map((index) => {
+            return itemsData.items[index]
+          })
+          .filter(Boolean)
+        if (itemsHere.length !== pickIndexHere.length) {
+          throw new Error(`Invalid items data: pickIndex not found ${itemsData.pickIndex}`)
+        }
+        return itemsHere
+      } else if (itemsData.pickMatch) {
         const itemsHere: typeof itemsData.items = []
         for (const pickMatchItem of itemsData.pickMatch) {
           const item = itemsData.items.find((item) => {
@@ -45,16 +62,6 @@ export const parseStoryTemplateFile = async ({
           itemsHere.push(item)
         }
         return itemsHere
-      } else if (itemsData.pickIndex) {
-        const itemsHere: typeof itemsData.items = itemsData.pickIndex
-          .map((index) => {
-            return itemsData.items[index]
-          })
-          .filter(Boolean)
-        if (itemsHere.length !== itemsData.pickIndex.length) {
-          throw new Error(`Invalid items data: pickIndex not found ${itemsData.pickIndex}`)
-        }
-        return itemsHere
       } else if (itemsData.pickCount) {
         return _.sampleSize(itemsData.items, itemsData.pickCount)
       } else {
@@ -63,6 +70,9 @@ export const parseStoryTemplateFile = async ({
     })()
     const template = Handlebars.compile(storyTemplateFileContentRaw)
     const storyTemplateFileContent = template({ items })
+    if (storyTemplateFileContent.includes('__UNDEFINED__')) {
+      throw new Error('Template contains __UNDEFINED__, missing items')
+    }
     return { storyTemplateFileContent }
   }
 }
@@ -174,6 +184,7 @@ export const generateStoryAndPicturesTexts = async ({
   worldFilePath,
   storyTemplateFilePath,
   itemsFilePath,
+  pickIndex,
   storyFilePath,
   picturesTextFilePath,
   verbose,
@@ -184,6 +195,7 @@ export const generateStoryAndPicturesTexts = async ({
   worldFilePath?: string
   storyTemplateFilePath: string
   itemsFilePath?: string
+  pickIndex?: number[]
   storyFilePath: string
   picturesTextFilePath: string
   verbose?: boolean
@@ -209,7 +221,7 @@ export const generateStoryAndPicturesTexts = async ({
     ? await parseCharacterFile({ characterFilePath })
     : { characterFileContent: null }
   const { worldFileContent } = worldFilePath ? await parseWorldFile({ worldFilePath }) : { worldFileContent: null }
-  const { storyTemplateFileContent } = await parseStoryTemplateFile({ storyTemplateFilePath, itemsFilePath })
+  const { storyTemplateFileContent } = await parseStoryTemplateFile({ storyTemplateFilePath, itemsFilePath, pickIndex })
   characterFileContent &&
     userPromptParts.push(`===============
 Character
@@ -231,6 +243,7 @@ After each paragraph provide additional paragraph started with text "Illustrate:
   const result: string = await completionByOpenai({
     userPrompt,
     systemPrompt,
+    model: 'o1-preview',
   })
   const resultParagraphs = result.split(/\n+/)
   const storyParagraphs: string[] = resultParagraphs.filter((paragraph) => !paragraph.startsWith('Illustrate:'))
@@ -500,4 +513,24 @@ export const uploadStoryToYoutube = async ({
     privacyStatus: 'public',
   })
   return result
+}
+
+export const getNextEpisodeNumber = async ({ episodesDir, config }: { episodesDir: string; config: Config }) => {
+  episodesDir = path.resolve(config.contentDir, episodesDir)
+  const { dirExists: episodesDirExists } = await isDirExists({ cwd: episodesDir })
+  if (!episodesDirExists) {
+    throw new Error(`Episodes directory does not exist: ${episodesDir}`)
+  }
+  const episodesPathsRaw = await fs.readdir(episodesDir)
+  const episodesPaths = episodesPathsRaw
+    // find all directoreies with numbers inside
+    .filter((episodePath) => /^\d+$/.test(episodePath))
+    .map((episodePath) => parseInt(episodePath))
+    .sort((a, b) => a - b)
+  if (episodesPaths.length === 0) {
+    throw new Error(`No episodes found in directory: ${episodesDir}`)
+  }
+  const lastEpisodeNumber = episodesPaths[episodesPaths.length - 1]
+  const nextEpisodeNumber = lastEpisodeNumber + 1
+  return { lastEpisodeNumber, nextEpisodeNumber }
 }

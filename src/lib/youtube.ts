@@ -57,6 +57,7 @@ const uploadFile = async ({
       status: {
         privacyStatus,
         madeForKids: false,
+        selfDeclaredMadeForKids: false,
       },
     },
     media: {
@@ -79,6 +80,8 @@ const uploadFile = async ({
             kind: 'youtube#video',
             videoId: id,
           },
+          // position: 0,
+          // Playlist should use manual sorting to support position.
         },
       },
     })

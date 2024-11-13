@@ -38,10 +38,27 @@ export const completionByOpenai = async <T>({
   model?: 'gpt-4o' | 'o1-preview'
 }): Promise<T> => {
   const { openai } = getOpenaiClient()
-  const chatMessages: ChatCompletionMessageParam[] = [
-    ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
-    { role: 'user' as const, content: userPrompt },
-  ]
+  const chatMessages: ChatCompletionMessageParam[] = (() => {
+    if (model === 'o1-preview' && !!systemPrompt) {
+      return [
+        {
+          role: 'user' as const,
+          content: `_____SYSTEM_PROMPT_____
+${systemPrompt}
+
+
+
+_____USER_PROMPT_____
+${userPrompt}`,
+        },
+      ]
+    } else {
+      return [
+        ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+        { role: 'user' as const, content: userPrompt },
+      ]
+    }
+  })()
   const res = await openai.chat.completions.create({
     messages: chatMessages,
     model,

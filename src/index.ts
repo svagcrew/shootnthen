@@ -14,6 +14,7 @@ import {
   generateStoryPictures,
   generateStoryTitle,
   generateStoryVideoByPictures,
+  getNextEpisodeNumber,
   uploadStoryToYoutube,
 } from '@/lib/gentube.js'
 import { googleDrive } from '@/lib/googledrive.js'
@@ -1299,6 +1300,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         worldFilePath,
         storyTemplateFilePath,
         itemsFilePath,
+        pickIndex,
         storyFilePath,
         picturesTextFilePath,
       } = z
@@ -1307,6 +1309,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           worldFilePath: z.string().optional(),
           storyTemplateFilePath: z.string().min(1),
           itemsFilePath: z.string().optional(),
+          pickIndex: z.string().optional(),
           storyFilePath: z.string().min(1),
           picturesTextFilePath: z.string().min(1),
           cont: z.boolean().optional(),
@@ -1332,6 +1335,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['items', 'i'],
             coalesce: undefined,
           }),
+          pickIndex: getFlagAsString({
+            flags,
+            keys: ['pick-index', 'k'],
+            coalesce: undefined,
+          }),
           storyFilePath: getFlagAsString({
             flags,
             keys: ['story', 's'],
@@ -1349,6 +1357,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         worldFilePath,
         storyTemplateFilePath,
         itemsFilePath,
+        pickIndex: pickIndex ? [parseInt(pickIndex.replaceAll(/\D/g, ''), 10)] : undefined,
         storyFilePath,
         picturesTextFilePath,
         verbose,
@@ -1616,6 +1625,218 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         force,
       })
       log.green(result)
+      break
+    }
+
+    case 'booh': {
+      const { pickIndexAsEpisodeNumber } = z
+        .object({
+          pickIndexAsEpisodeNumber: z.boolean(),
+        })
+        .parse({
+          pickIndexAsEpisodeNumber: getFlagAsBoolean({
+            flags,
+            keys: ['pick-index-as-episode-number', 'k'],
+            coalesce: false,
+          }),
+        })
+      const srcLang = 'en'
+      const contentDir = config.contentDir
+      const episodesDir = path.resolve(contentDir, 'episodes')
+      const { nextEpisodeNumber } = await getNextEpisodeNumber({ config, episodesDir })
+      const episodeNumber = nextEpisodeNumber
+      const episodeDir = path.resolve(episodesDir, `${episodeNumber}`)
+      const generalDir = path.resolve(contentDir, 'general')
+
+      const storyFilePath = path.resolve(episodeDir, 'story.txt')
+      const picturesTextFilePath = path.resolve(episodeDir, 'pictures.txt')
+      const titleFilePath = path.resolve(episodeDir, 'title.txt')
+      const descriptionFilePath = path.resolve(episodeDir, 'description.txt')
+      const picturesDirPath = path.resolve(episodeDir, 'pictures')
+      const audioPartsDirPath = path.resolve(episodeDir, 'audio-parts')
+      const audioFilePath = path.resolve(episodeDir, `story.en.mp3`)
+      const videoSilentFilePath = path.resolve(episodeDir, `story.mp4`)
+      const videoFilePath = path.resolve(episodeDir, `story.en.mp4`)
+      const storyTemplateFilePath = path.resolve(generalDir, 'storyTemplate.txt')
+      const itemsFilePath = path.resolve(generalDir, 'items.json')
+      const pictureTemplateFilePath = path.resolve(generalDir, 'pictureTemplate.txt')
+
+      const shrt = (fullFilePath: string) => fullFilePath.replace(contentDir + '/', '')
+      const storyFilePathShrt = shrt(storyFilePath)
+      const picturesTextFilePathShrt = shrt(picturesTextFilePath)
+      const titleFilePathShrt = shrt(titleFilePath)
+      const descriptionFilePathShrt = shrt(descriptionFilePath)
+      const picturesDirPathShrt = shrt(picturesDirPath)
+      const audioPartsDirPathShrt = shrt(audioPartsDirPath)
+      const audioFilePathShrt = shrt(audioFilePath)
+      const videoSilentFilePathShrt = shrt(videoSilentFilePath)
+      const videoFilePathShrt = shrt(videoFilePath)
+      const storyTemplateFilePathShrt = shrt(storyTemplateFilePath)
+      const itemsFilePathShrt = shrt(itemsFilePath)
+      const pictureTemplateFilePathShrt = shrt(pictureTemplateFilePath)
+
+      // COMMANDS:
+      //    if pickIndexAsEpisodeNumber
+      // snt stp -i general/items.json -k episodes/2 -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
+      //    else
+      // snt stp -i general/items.json -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
+      //    fi
+      // snt st -s episodes/2/story.txt -o episodes/2/title.txt && \
+      // snt sd -s episodes/2/story.txt -o episodes/2/description.txt && \
+      // snt sp -p episodes/2/pictures.txt -t general/pictureTemplate.txt -o episodes/2/pictures --cont && \
+      // snt sap -l en -s episodes/2/story.txt -o episodes/2/audio-parts --cont && \
+      // snt saf -d episodes/2/audio-parts -o episodes/2/story.en.mp3 && \
+      // snt spv -p episodes/2/pictures -a episodes/2/audio-parts -o episodes/2/story.mp4 && \
+      // snt aa episodes/2/story.mp4 -l en && \
+      // snt syu -v episodes/2/story.en.mp4 -t episodes/2/title.txt -d episodes/2/description.txt
+      let lastCommandIndex = -1
+      const commands = [
+        pickIndexAsEpisodeNumber
+          ? `snt stp -i ${itemsFilePathShrt} -k episodes/${episodeNumber} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt}`
+          : `snt stp -i ${itemsFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt}`,
+        `snt st -s ${storyFilePathShrt} -o ${titleFilePathShrt}`,
+        `snt sd -s ${storyFilePathShrt} -o ${descriptionFilePathShrt}`,
+        `snt sp -p ${picturesTextFilePathShrt} -t ${pictureTemplateFilePathShrt} -o ${picturesDirPathShrt} --cont`,
+        `snt sap -l ${srcLang} -s ${storyFilePathShrt} -o ${audioPartsDirPathShrt} --cont`,
+        `snt saf -d ${audioPartsDirPathShrt} -o ${audioFilePathShrt}`,
+        `snt spv -p ${picturesDirPathShrt} -a ${audioPartsDirPathShrt} -o ${videoSilentFilePathShrt}`,
+        `snt aa ${videoSilentFilePathShrt} -l ${srcLang}`,
+        `snt syu -v ${videoFilePathShrt} -t ${titleFilePathShrt} -d ${descriptionFilePathShrt}`,
+      ]
+
+      log.green('Commands:', ...commands)
+
+      try {
+        // Step 1
+        lastCommandIndex++
+        if (pickIndexAsEpisodeNumber) {
+          // snt stp -i general/items.json -k episodes/2 -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt
+          await generateStoryAndPicturesTexts({
+            config,
+            itemsFilePath,
+            pickIndex: [episodeNumber],
+            storyTemplateFilePath,
+            storyFilePath,
+            picturesTextFilePath,
+            verbose,
+            force,
+          })
+        } else {
+          // snt stp -i general/items.json -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
+          await generateStoryAndPicturesTexts({
+            config,
+            itemsFilePath,
+            storyTemplateFilePath,
+            storyFilePath,
+            picturesTextFilePath,
+            verbose,
+            force,
+          })
+        }
+
+        // Step 2
+        // snt st -s episodes/2/story.txt -o episodes/2/title.txt
+        lastCommandIndex++
+        await generateStoryTitle({
+          config,
+          storyFilePath,
+          titleFilePath,
+          verbose,
+          force,
+        })
+
+        // Step 3
+        // snt sd -s episodes/2/story.txt -o episodes/2/description.txt && \
+        lastCommandIndex++
+        await generateStoryDescription({
+          config,
+          storyFilePath,
+          descriptionFilePath,
+          verbose,
+          force,
+        })
+
+        // Step 4
+        // snt sp -p episodes/2/pictures.txt -t general/pictureTemplate.txt -o episodes/2/pictures --cont
+        lastCommandIndex++
+        await generateStoryPictures({
+          config,
+          picturesTextFilePath,
+          pictureTemplateFilePath,
+          picturesDirPath,
+          cont: true,
+          verbose,
+          force,
+        })
+
+        // Step 5
+        // snt sap -l en -s episodes/2/story.txt -o episodes/2/audio-parts --cont
+        lastCommandIndex++
+        await generateStoryAudioParts({
+          config,
+          storyFilePath,
+          audioPartsDirPath,
+          lang: srcLang,
+          cont: true,
+          verbose,
+          force,
+        })
+
+        // Step 6
+        // snt saf -d episodes/2/audio-parts -o episodes/2/story.en.mp3
+        lastCommandIndex++
+        await generateStoryAudio({
+          config,
+          audioFilePath,
+          audioPartsDirPath,
+          verbose,
+          force,
+        })
+
+        // Step 7
+        // snt spv -p episodes/2/pictures -a episodes/2/audio-parts -o episodes/2/story.mp4
+        lastCommandIndex++
+        await generateStoryVideoByPictures({
+          config,
+          videoFilePath: videoSilentFilePath,
+          picturesDirPath,
+          audioPartsDirPath,
+          verbose,
+          force,
+        })
+
+        // Step 8
+        // snt aa episodes/2/story.mp4 -l en
+        lastCommandIndex++
+        await applyAudiosToVideo({
+          inputVideoPath: videoSilentFilePath,
+          config,
+          langs: [srcLang],
+          verbose,
+        })
+
+        // Step 9
+        // snt syu -v episodes/2/story.en.mp4 -t episodes/2/title.txt -d episodes/2/description.txt
+        lastCommandIndex++
+        await uploadStoryToYoutube({
+          config,
+          storyTitleFilePath: titleFilePath,
+          storyDescriptionFilePath: descriptionFilePath,
+          videoFilePath,
+          verbose,
+          force,
+        })
+
+        log.green('Success')
+      } catch (error: any) {
+        // eslint-disable-next-line no-console
+        console.error(error)
+        log.red('Error on command:', commands[lastCommandIndex])
+        const nextCommads = commands.slice(lastCommandIndex)
+        log.red('You should run commands:', ...nextCommads)
+      }
+
+      // log.green(result)
       break
     }
 
