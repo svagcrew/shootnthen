@@ -56,6 +56,7 @@ const uploadFile = async ({
       },
       status: {
         privacyStatus,
+        madeForKids: false,
       },
     },
     media: {
