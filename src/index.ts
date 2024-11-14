@@ -4,7 +4,8 @@ import { auphonic } from '@/lib/auphonic.js'
 import { ttsByAzureai } from '@/lib/azureai.js'
 import { getConfig } from '@/lib/config.js'
 import { applyAudiosToVideo, converWavToMp3, cutVideo, decutVideo, extractAudio } from '@/lib/editor.js'
-import { elevenlabs } from '@/lib/elevenlabs.js'
+import { elevenlabs } from '@/lib/elevenlabs.dubbing.js'
+import { getVoicesElevenlabs } from '@/lib/elevenlabs.general.js'
 import { removeVideosAndAudios } from '@/lib/fs.js'
 import {
   generateStoryAndPicturesTexts,
@@ -1239,6 +1240,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         // snt aa zxc.ru.mp4 -l en
         commands.push(`snt aa ${parsedFilePath.basename} -l ${distLang}`)
       }
+      commands.push(`snt aa ${parsedFilePath.basename} -l ${[srcLang, ...distLangs].join(',')}`)
       log.green('Commands:', ...commands)
       try {
         if (!skipSrcCommands) {
@@ -1282,6 +1284,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           lastCommandIndex++
           await applyAudiosToVideo({ inputVideoPath: filePath, config, langs: [distLang] })
         }
+        await applyAudiosToVideo({ inputVideoPath: filePath, config, langs: [srcLang, ...distLangs] })
         log.green('Success')
       } catch (error: any) {
         // eslint-disable-next-line no-console
@@ -1913,6 +1916,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   const executionDurationSeconds = executionDurationMs / 1_000
   const executionDurationMinutes = executionDurationSeconds / 60
   const fullCommandString = [command, ...argr].join(' ')
+  await getVoicesElevenlabs()
   log.normal(
     `Execution duration`,
     fullCommandString,

@@ -2,6 +2,7 @@
 import type { Config } from '@/exports.js'
 import { ttsMegasimpleByAzureai } from '@/lib/azureai.js'
 import { concatAudios, concatImagesToVideo, getAudioDuration } from '@/lib/editor.js'
+import { ttsMegasimpleWithTimestampsByElevenlabs } from '@/lib/elevenlabs.general.js'
 import { completionByOpenai, imageByOpenai } from '@/lib/openai.js'
 import { youtube } from '@/lib/youtube.js'
 import { promises as fs } from 'fs'
@@ -319,6 +320,7 @@ export const generateStoryAudioParts = async ({
   config,
   storyFilePath,
   audioPartsDirPath,
+  ttsProvider = 'elevenlabs',
   lang,
   verbose,
   force,
@@ -327,6 +329,7 @@ export const generateStoryAudioParts = async ({
   config: Config
   storyFilePath: string
   audioPartsDirPath: string
+  ttsProvider?: 'azureai' | 'elevenlabs'
   lang: string
   verbose?: boolean
   force?: boolean
@@ -343,7 +346,9 @@ export const generateStoryAudioParts = async ({
   const audioPartFilePaths: string[] = []
   for (const [index, storyParagraph] of storyParagraphs.entries()) {
     verbose && log.normal('Generating story audio part', { index, storyParagraph })
+    const audioDataFileName = `${index}.json`
     const audioPartFileName = `${index}.mp3`
+    const audioDataFilePath = path.resolve(audioPartsDirPath, audioDataFileName)
     const audioPartFilePath = path.resolve(audioPartsDirPath, audioPartFileName)
     const { fileExists: audioPartFileExists } = await isFileExists({ filePath: audioPartFilePath })
     if (cont && audioPartFileExists) {
@@ -352,12 +357,22 @@ export const generateStoryAudioParts = async ({
       continue
     }
     audioPartFilePaths.push(audioPartFilePath)
-    await ttsMegasimpleByAzureai({
-      text: storyParagraph,
-      lang,
-      verbose,
-      distAudioPath: audioPartFilePath,
-    })
+    if (ttsProvider === 'elevenlabs') {
+      await ttsMegasimpleWithTimestampsByElevenlabs({
+        text: storyParagraph,
+        lang,
+        verbose,
+        distAudioPath: audioPartFilePath,
+        distDataPath: audioDataFilePath,
+      })
+    } else if (ttsProvider === 'azureai') {
+      await ttsMegasimpleByAzureai({
+        text: storyParagraph,
+        lang,
+        verbose,
+        distAudioPath: audioPartFilePath,
+      })
+    }
   }
   return {
     audioPartsDirPath,
