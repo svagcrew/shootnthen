@@ -1030,14 +1030,12 @@ export const concatImagesToVideoWithTransitions = async ({
     }
   }
 
-  // ASAP
   verbose && log.normal('Concatenating all videos into a single video', { allVideosFilePaths, outputVideoPath })
   await concatSilentVideos({ inputVideoPaths: allVideosFilePaths, outputVideoPath, verbose })
 
   // Clean up temporary video files
   verbose && log.normal('Cleaning up temporary video files')
-  // ASAP
-  // await fs.rmdir(tempDirPath, { recursive: true })
+  await fs.rmdir(tempDirPath, { recursive: true })
 
   verbose && log.normal('Successfully concatenated images to video with transitions', { imagesPaths, outputVideoPath })
 
@@ -1149,15 +1147,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     const dialogueEvents = []
 
-    for (const sentenceWords of sentences) {
+    for (const [sentenceIndex, sentenceWords] of sentences.entries()) {
       // const sentenceText = sentenceWords.map((w) => w.word).join(' ')
 
       for (let index = 0; index < sentenceWords.length; index++) {
         const currentWordObj = sentenceWords[index]
         const nextWordObj = sentenceWords[index + 1]
         const currentWordStart = msToAssTime(currentWordObj.startMs)
-        const currentWordEnd = msToAssTime(currentWordObj.endMs)
-        const nextWordStart = nextWordObj ? msToAssTime(nextWordObj.startMs) : currentWordEnd
+        const currentWordEndMs = currentWordObj.endMs
+        // const currentWordEnd = msToAssTime(currentWordEndMs)
+        const nextWordStartMs = nextWordObj ? nextWordObj.startMs : currentWordObj.endMs
+        // const nextWordStart = msToAssTime(nextWordStartMs)
+        const isLastWord = !nextWordObj
+        const nextSentenceStartMs = isLastWord ? sentences[sentenceIndex + 1]?.[0]?.startMs : undefined
+        const msBetweenNextSentenceStartAndCurrentWordEnd = nextSentenceStartMs
+          ? nextSentenceStartMs - currentWordObj.endMs
+          : 0
+        const dialogueEndMs = !isLastWord
+          ? nextWordStartMs
+          : msBetweenNextSentenceStartAndCurrentWordEnd < 1_000
+            ? nextSentenceStartMs || currentWordEndMs
+            : currentWordEndMs
+        const dialogueEnd = msToAssTime(dialogueEndMs)
 
         // Build the text with the current word highlighted
         const text = sentenceWords
@@ -1171,7 +1182,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           })
           .join(' ')
 
-        dialogueEvents.push(`Dialogue: 0,${currentWordStart},${nextWordStart},Default,,0,0,0,,${text}`)
+        dialogueEvents.push(`Dialogue: 0,${currentWordStart},${dialogueEnd},Default,,0,0,0,,${text}`)
       }
     }
 

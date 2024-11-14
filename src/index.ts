@@ -19,6 +19,7 @@ import {
   getNextEpisodeNumber,
   uploadStoryToYoutube,
 } from '@/lib/gentube.js'
+import { getGoogleAuthClient } from '@/lib/google.js'
 import { googleDrive } from '@/lib/googledrive.js'
 import { kinescope } from '@/lib/kinescope.js'
 import { loom } from '@/lib/loom.js'
@@ -36,7 +37,6 @@ import path from 'path'
 import readlineSync from 'readline-sync'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
 import z from 'zod'
-import { getGoogleAuthClient } from '@/lib/google.js'
 
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   const startedAt = new Date()
@@ -1892,7 +1892,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         await applyAssSubtitlesToStoryVideo({
           config,
           inputVideoPath: videoNoassSilentFilePath,
-          outputVideoPath: videoFilePath,
+          outputVideoPath: videoSilentFilePath,
           audioPartsDirPath,
           verbose,
           force,
