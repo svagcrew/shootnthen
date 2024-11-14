@@ -36,6 +36,7 @@ import path from 'path'
 import readlineSync from 'readline-sync'
 import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
 import z from 'zod'
+import { getGoogleAuthClient } from '@/lib/google.js'
 
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   const startedAt = new Date()
@@ -117,6 +118,14 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       log.green(result)
       break
     }
+
+    case 'google-auth':
+    case 'ga': {
+      await getGoogleAuthClient({ config })
+      log.green('Auth client is ready')
+      break
+    }
+
     case 'download-from-google-drive':
     case 'dg': {
       const { fileId, fileUrl, filePath } = z
@@ -1677,14 +1686,20 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     }
 
     case 'booh': {
-      const { pickIndexAsEpisodeNumber } = z
+      const { pickIndexAsEpisodeNumber, noItems } = z
         .object({
           pickIndexAsEpisodeNumber: z.boolean(),
+          noItems: z.boolean(),
         })
         .parse({
           pickIndexAsEpisodeNumber: getFlagAsBoolean({
             flags,
             keys: ['pick-index-as-episode-number', 'k'],
+            coalesce: false,
+          }),
+          noItems: getFlagAsBoolean({
+            flags,
+            keys: ['no-items', 'n'],
             coalesce: false,
           }),
         })
@@ -1728,6 +1743,8 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       // COMMANDS:
       //    if pickIndexAsEpisodeNumber
       // snt stp -i general/items.json -k episodes/2 -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
+      //    else if noItems
+      // snt stp -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
       //    else
       // snt stp -i general/items.json -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
       //    fi
@@ -1744,7 +1761,9 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const commands = [
         pickIndexAsEpisodeNumber
           ? `snt stp -i ${itemsFilePathShrt} -k episodes/${episodeNumber} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`
-          : `snt stp -i ${itemsFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`,
+          : noItems
+            ? `snt stp -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`
+            : `snt stp -i ${itemsFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`,
         `snt st -s ${storyFilePathShrt} -o ${titleFilePathShrt} && \\`,
         `snt sd -s ${storyFilePathShrt} -o ${descriptionFilePathShrt} && \\`,
         `snt sp -p ${picturesTextFilePathShrt} -t ${pictureTemplateFilePathShrt} -o ${picturesDirPathShrt} --cont && \\`,
@@ -1767,6 +1786,15 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             config,
             itemsFilePath,
             pickIndex: [episodeNumber],
+            storyTemplateFilePath,
+            storyFilePath,
+            picturesTextFilePath,
+            verbose,
+            force,
+          })
+        } else if (noItems) {
+          await generateStoryAndPicturesTexts({
+            config,
             storyTemplateFilePath,
             storyFilePath,
             picturesTextFilePath,
@@ -1917,6 +1945,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
         cut | cut-video <inputVideoPath> <outputVideoPath> <start> <end>
 
+        ga | google-auth
         dg | download-from-google-drive ?--file-id(-i) <fileId> ?--file-path(-p) <filePath> ?--file-url(-u) <fileUrl>
         dgs | download-from-google-drive-by-search <search> --dir <dirId> 
         ug | upload-to-google-drive --dir <dirId> <files>

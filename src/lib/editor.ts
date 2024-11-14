@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/no-for-loop */
 /* eslint-disable unicorn/prefer-type-error */
 import type { Config } from '@/lib/config.js'
 import { parseFileName } from '@/lib/meta.js'
@@ -182,6 +183,30 @@ export const cutVideo = async ({
   return {
     inputVideoPath: normalizedInputVideoPath,
     outputVideoPath: normalizedOutputVideoPath,
+  }
+}
+
+export const concatSilentVideos = async ({
+  inputVideoPaths,
+  outputVideoPath,
+  verbose,
+}: {
+  inputVideoPaths: string[]
+  outputVideoPath: string
+  verbose?: boolean
+}) => {
+  const inputFiles = inputVideoPaths.map((path) => `-i "${path}"`).join(' ')
+
+  // Generate the filter_complex string for video-only concatenation
+  const filterInput = inputVideoPaths.map((_, index) => `[${index}:v]`).join('')
+  const filterComplex = `"${filterInput}concat=n=${inputVideoPaths.length}:v=1:a=0[outv]"`
+
+  const nativeCommand = `ffmpeg ${inputFiles} -y -filter_complex ${filterComplex} -map "[outv]" "${outputVideoPath}"`
+  verbose && log.normal('Executing ffmpeg command:', nativeCommand)
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+  return {
+    inputVideoPaths,
+    outputVideoPath,
   }
 }
 
@@ -603,7 +628,315 @@ export const concatImagesToVideo = async ({
   }
 }
 
-export const prepareImagesToVideoWithTransitions = async ({
+export const convertImagesToVideosWithoutTransitions = async ({
+  imagesPaths,
+  durationsMs,
+  normalizedTransitions,
+  width,
+  height,
+  tempDirPath,
+  cont,
+  verbose,
+}: {
+  imagesPaths: string[]
+  durationsMs: number[]
+  normalizedTransitions: Array<{ transitionDurationMs: number; transitionName: TransitionName }>
+  width: number
+  height: number
+  tempDirPath: string
+  cont?: boolean
+  verbose?: boolean
+}) => {
+  const getTempVideoFilePath = (index: number) => path.resolve(tempDirPath, `${index}.mp4`)
+  const tempVideoPaths: string[] = []
+
+  // Generate individual video files for each image
+  for (let i = 0; i < imagesPaths.length; i++) {
+    const imagePath = imagesPaths[i]
+    let durationMs = durationsMs[i]
+
+    // Adjust duration for transitions
+    if (i < imagesPaths.length - 1) {
+      const transitionDuration = normalizedTransitions[i].transitionDurationMs
+      durationMs -= transitionDuration * 3
+      if (durationMs < 0) {
+        throw new Error(`Duration of image at index ${i} is less than its transition duration`)
+      }
+    }
+
+    const durationSec = durationMs / 1_000
+    const tempVideoPath = getTempVideoFilePath(i)
+    tempVideoPaths.push(tempVideoPath)
+    const { fileExists } = isFileExistsSync({ filePath: tempVideoPath })
+    if (fileExists && cont) {
+      verbose && log.normal('Video file already exists', { tempVideoPath })
+      continue
+    }
+
+    // Build ffmpeg arguments
+    const ffmpegArgs = [
+      '-loop',
+      '1',
+      '-t',
+      `${durationSec}`,
+      '-i',
+      `"${imagePath}"`,
+      '-vf',
+      `"scale=${width}:${height},setsar=1"`,
+      '-c:v',
+      'libx264',
+      '-crf',
+      '24',
+      '-preset',
+      'ultrafast',
+      '-r',
+      '25',
+      '-y',
+      `"${tempVideoPath}"`,
+    ]
+
+    // Execute ffmpeg command
+    const ffmpegCommand = `ffmpeg ${ffmpegArgs.join(' ')}`
+    verbose && log.normal('Executing ffmpeg command:', ffmpegCommand)
+    await spawn({ command: ffmpegCommand, cwd: process.cwd() })
+  }
+
+  return {
+    imagesPaths,
+    tempVideoPaths,
+    tempDirPath,
+    normalizedTransitions,
+  }
+}
+
+export const convertImagesToVideosForTransitions = async ({
+  imagesPaths,
+  normalizedTransitions,
+  width,
+  height,
+  tempDirPath,
+  cont,
+  verbose,
+}: {
+  imagesPaths: string[]
+  normalizedTransitions: Array<{ transitionDurationMs: number; transitionName: TransitionName }>
+  width: number
+  height: number
+  tempDirPath: string
+  cont?: boolean
+  verbose?: boolean
+}) => {
+  const getVideoForTransitionFilePath = (index: number, position: 'start' | 'end') =>
+    path.resolve(tempDirPath, `${index}.${position}.mp4`)
+  const getTransitionVideoFilePath = (currenIndex: number, nextIndex: number) =>
+    path.resolve(tempDirPath, `${currenIndex}_${nextIndex}.transition.mp4`)
+  const concatVideosWithTransitionsArgsArray: Array<{
+    inputVideoPaths: string[]
+    outputVideoPath: string
+    normalizedTransitions: Array<{
+      transitionDurationMs: number
+      transitionName: TransitionName
+    }>
+  }> = []
+
+  // Generate individual video files for each image
+  for (let i = 0; i < normalizedTransitions.length; i++) {
+    const imagePathCurrent = imagesPaths[i]
+    const imagePathNext = imagesPaths[i + 1]
+    const transition = normalizedTransitions[i]
+    const durationMs = transition.transitionDurationMs * 2
+    const durationSec = durationMs / 1_000
+    const tempVideoForTransitionPathCurrent = getVideoForTransitionFilePath(i, 'end')
+    const tempVideoForTransitionPathNext = getVideoForTransitionFilePath(i + 1, 'start')
+    concatVideosWithTransitionsArgsArray.push({
+      inputVideoPaths: [tempVideoForTransitionPathCurrent, tempVideoForTransitionPathNext],
+      outputVideoPath: getTransitionVideoFilePath(i, i + 1),
+      normalizedTransitions: [transition],
+    })
+    const { fileExists: tempVideoForTransitionPathCurrentExists } = isFileExistsSync({
+      filePath: tempVideoForTransitionPathCurrent,
+    })
+    const { fileExists: tempVideoForTransitionPathNextExists } = isFileExistsSync({
+      filePath: tempVideoForTransitionPathNext,
+    })
+    if (tempVideoForTransitionPathCurrentExists && tempVideoForTransitionPathNextExists && cont) {
+      verbose &&
+        log.normal('Video files already exists', { tempVideoForTransitionPathCurrent, tempVideoForTransitionPathNext })
+      continue
+    }
+
+    const ffmpegArgs = [
+      '-loop',
+      '1',
+      '-t',
+      `${durationSec}`,
+      '-i',
+      `"${imagePathCurrent}"`,
+      '-vf',
+      `"scale=${width}:${height},setsar=1"`,
+      '-c:v',
+      'libx264',
+      '-crf',
+      '24',
+      '-preset',
+      'ultrafast',
+      '-r',
+      '25',
+      '-y',
+      `"${tempVideoForTransitionPathCurrent}"`,
+    ]
+    const ffmpegCommand = `ffmpeg ${ffmpegArgs.join(' ')}`
+    verbose && log.normal('Executing ffmpeg command:', ffmpegCommand)
+    await spawn({ command: ffmpegCommand, cwd: process.cwd() })
+
+    const ffmpegArgs2 = [
+      '-loop',
+      '1',
+      '-t',
+      `${durationSec}`,
+      '-i',
+      `"${imagePathNext}"`,
+      '-vf',
+      `"scale=${width}:${height},setsar=1"`,
+      '-c:v',
+      'libx264',
+      '-crf',
+      '24',
+      '-preset',
+      'ultrafast',
+      '-r',
+      '25',
+      '-y',
+      `"${tempVideoForTransitionPathNext}"`,
+    ]
+    const ffmpegCommand2 = `ffmpeg ${ffmpegArgs2.join(' ')}`
+    verbose && log.normal('Executing ffmpeg command:', ffmpegCommand2)
+    await spawn({ command: ffmpegCommand2, cwd: process.cwd() })
+  }
+
+  return {
+    concatVideosWithTransitionsArgsArray,
+  }
+}
+
+export const concatVideosWithTransitions = async ({
+  inputVideoPaths,
+  normalizedTransitions,
+  outputVideoPath,
+  tempDirPath,
+  index,
+  cont,
+  verbose,
+}: {
+  inputVideoPaths: string[]
+  normalizedTransitions: Array<{ transitionDurationMs: number; transitionName: TransitionName }>
+  outputVideoPath: string
+  tempDirPath: string
+  index: number
+  cont?: boolean
+  verbose?: boolean
+}) => {
+  const tempConcatDirPath = path.resolve(tempDirPath, 'concat')
+  await fs.mkdir(tempConcatDirPath, { recursive: true })
+  const tempTransitionFilePath = path.resolve(tempDirPath, `transitions-${index}.json`)
+  const { fileExists } = isFileExistsSync({ filePath: outputVideoPath })
+  if (fileExists && cont) {
+    verbose && log.normal('concatVideosWithTransitions: video file already exists', { outputVideoPath })
+    return
+  }
+  // Prepare transitions for ffmpeg-concat
+  const transitionSettings = normalizedTransitions.map((transition) => ({
+    name: transition.transitionName,
+    duration: transition.transitionDurationMs, // Convert ms to seconds
+  }))
+  await fs.writeFile(tempTransitionFilePath, JSON.stringify(transitionSettings))
+
+  // Use ffmpeg-concat to concatenate videos with transitions
+  verbose && log.normal('Concatenating videos with transitions using ffmpeg-concat')
+  const tempFilesSpaceSeparated = inputVideoPaths.map((inputVideoPath) => `'${inputVideoPath}'`).join(' ')
+  await spawn({
+    command: `ffmpeg-concat -O '${tempConcatDirPath}' -T '${tempTransitionFilePath}' -o '${outputVideoPath}' ${tempFilesSpaceSeparated}`,
+    cwd: process.cwd(),
+  })
+  await fs.rmdir(tempConcatDirPath, { recursive: true })
+}
+
+// export const prepareArgumentsForConcatManyVideosWithTransitions = ({
+//   inputVideoPaths,
+//   normalizedTransitions,
+//   outputVideoPath,
+//   tempDirPath,
+// }: {
+//   inputVideoPaths: string[]
+//   normalizedTransitions: Array<{ transitionDurationMs: number; transitionName: TransitionName }> // inputVideoPaths.length - 1
+//   outputVideoPath: string
+//   tempDirPath: string
+// }) => {
+//   // INPUT:
+//   // inputVideoPaths: [0.mp4, 1.mp4, 2.mp4, 3.mp4, 4.mp4, ...]
+//   // outputVideoPath: xmp4
+//   // normalizedTransitions: [...]
+//   // OUTPUT:
+//   // [{inputVideoPaths: [0.mp4, 1.mp4], outputVideoPath: 0-1.mp4, normalizedTransitions: [srcNormalizedTransitions[0]]},{inputVideoPaths: [0-1.mp4, 2.mp4], outputVideoPath: 0-1-2.mp4, normalizedTransitions: [srcNormalizedTransitions[1]]},{inputVideoPaths: [0-1-2.mp4, 3.mp4], outputVideoPath: x.mp4, normalizedTransitions: [srcNormalizedTransitions[2]]}]
+//   // Initialize the array to hold the arguments
+//   const argsArray: Array<{
+//     inputVideoPaths: string[]
+//     outputVideoPath: string
+//     normalizedTransitions: Array<{
+//       transitionDurationMs: number
+//       transitionName: TransitionName
+//     }>
+//   }> = []
+
+//   // Start with the first video path
+//   let lastOutputVideoPath = inputVideoPaths[0]
+
+//   for (let index = 0; index < normalizedTransitions.length; index++) {
+//     const transition = normalizedTransitions[index]
+//     const nextInputVideoPath = inputVideoPaths[index + 1]
+
+//     // Determine the output path for the current concatenation
+//     const isLastTransition = index === normalizedTransitions.length - 1
+//     const outputPath = isLastTransition
+//       ? outputVideoPath // Use the final output path if it's the last transition
+//       : path.join(
+//           tempDirPath,
+//           `${path.basename(lastOutputVideoPath, path.extname(lastOutputVideoPath))}-${path.basename(
+//             nextInputVideoPath,
+//             path.extname(nextInputVideoPath)
+//           )}.mp4`
+//         )
+
+//     // Add the current set of arguments to the array
+//     argsArray.push({
+//       inputVideoPaths: [lastOutputVideoPath, nextInputVideoPath],
+//       outputVideoPath: outputPath,
+//       normalizedTransitions: [transition],
+//     })
+
+//     // Update the last output video path for the next iteration
+//     lastOutputVideoPath = outputPath
+//   }
+
+//   return { argsArray }
+// }
+
+const knowTransitionNames = [
+  'fade', // simple
+  'circleopen', // simple
+  'directionalwarp', // best
+  'directionalwipe', // best
+  'crosswarp', // best
+  'crosszoom', // best
+  'dreamy', // best
+  // 'squareswire', // bad
+  // 'angular', // bad
+  // 'radial', // bad
+  // 'cube', // bad
+  // 'swap', // bad
+] as const
+type TransitionName = (typeof knowTransitionNames)[number]
+export const concatImagesToVideoWithTransitions = async ({
   imagesPaths,
   durationsMs,
   transitionDurationMs = 1_000,
@@ -656,232 +989,50 @@ export const prepareImagesToVideoWithTransitions = async ({
     throw new Error('No images provided for video creation')
   }
 
-  // Get the resolution of the first image
-  const { width, height } = await getImageDimensions({ imagePath: imagesPaths[0] })
-
   const outputVideoDirPath = path.dirname(outputVideoPath)
   const outputVideoBaseName = path.basename(outputVideoPath, path.extname(outputVideoPath))
   const tempDirPath = path.resolve(outputVideoDirPath, `${outputVideoBaseName}.temp`)
   await fs.mkdir(tempDirPath, { recursive: true })
-  const getTempVideoFilePath = (index: number) => path.resolve(tempDirPath, `${index}.mp4`)
-  const tempVideoPaths: string[] = []
 
-  // Generate individual video files for each image
-  for (let i = 0; i < imagesPaths.length; i++) {
-    const imagePath = imagesPaths[i]
-    let durationMs = durationsMs[i]
+  // Get the resolution of the first image
+  const { width, height } = await getImageDimensions({ imagePath: imagesPaths[0] })
 
-    // Adjust duration for transitions
-    if (i < imagesPaths.length - 1) {
-      const transitionDuration = normalizedTransitions[i].transitionDurationMs
-      durationMs += transitionDuration
-      if (durationMs < 0) {
-        throw new Error(`Duration of image at index ${i} is less than its transition duration`)
-      }
-    }
-
-    const durationSec = durationMs / 1_000
-    const tempVideoPath = getTempVideoFilePath(i)
-    tempVideoPaths.push(tempVideoPath)
-    const { fileExists } = isFileExistsSync({ filePath: tempVideoPath })
-    if (fileExists && cont) {
-      verbose && log.normal('Video file already exists', { tempVideoPath })
-      continue
-    }
-
-    // Build ffmpeg arguments
-    const ffmpegArgs = [
-      '-loop',
-      '1',
-      '-t',
-      `${durationSec}`,
-      '-i',
-      `"${imagePath}"`,
-      '-vf',
-      `"scale=${width}:${height},setsar=1"`,
-      '-c:v',
-      'libx264',
-      '-crf',
-      '24',
-      '-preset',
-      'ultrafast',
-      '-r',
-      '25',
-      '-y',
-      `"${tempVideoPath}"`,
-    ]
-
-    // Execute ffmpeg command
-    const ffmpegCommand = `ffmpeg ${ffmpegArgs.join(' ')}`
-    verbose && log.normal('Executing ffmpeg command:', ffmpegCommand)
-    await spawn({ command: ffmpegCommand, cwd: process.cwd() })
-  }
-
-  return {
-    imagesPaths,
-    tempVideoPaths,
-    tempDirPath,
-    normalizedTransitions,
-  }
-}
-
-export const concatVideosWithTransitions = async ({
-  inputVideoPaths,
-  normalizedTransitions,
-  outputVideoPath,
-  tempDirPath,
-  index,
-  cont,
-  verbose,
-}: {
-  inputVideoPaths: string[]
-  normalizedTransitions: Array<{ transitionDurationMs: number; transitionName: TransitionName }>
-  outputVideoPath: string
-  tempDirPath: string
-  index: number
-  cont?: boolean
-  verbose?: boolean
-}) => {
-  const tempConcatDirPath = path.resolve(tempDirPath, 'concat')
-  await fs.mkdir(tempConcatDirPath, { recursive: true })
-  const tempTransitionFilePath = path.resolve(tempDirPath, `transitions-${index}.json`)
-  const { fileExists } = isFileExistsSync({ filePath: outputVideoPath })
-  if (fileExists && cont) {
-    verbose && log.normal('concatVideosWithTransitions: video file already exists', { outputVideoPath })
-    return
-  }
-  // Prepare transitions for ffmpeg-concat
-  const transitionSettings = normalizedTransitions.map((transition) => ({
-    name: transition.transitionName,
-    duration: transition.transitionDurationMs, // Convert ms to seconds
-  }))
-  await fs.writeFile(tempTransitionFilePath, JSON.stringify(transitionSettings))
-
-  // Use ffmpeg-concat to concatenate videos with transitions
-  verbose && log.normal('Concatenating videos with transitions using ffmpeg-concat')
-  const tempFilesSpaceSeparated = inputVideoPaths.map((inputVideoPath) => `'${inputVideoPath}'`).join(' ')
-  await spawn({
-    command: `ffmpeg-concat -O '${tempConcatDirPath}' -T '${tempTransitionFilePath}' -o '${outputVideoPath}' ${tempFilesSpaceSeparated}`,
-    cwd: process.cwd(),
-  })
-  await fs.rmdir(tempConcatDirPath, { recursive: true })
-}
-
-export const prepareArgumentsForConcatManyVideosWithTransitions = ({
-  inputVideoPaths,
-  normalizedTransitions,
-  outputVideoPath,
-  tempDirPath,
-}: {
-  inputVideoPaths: string[]
-  normalizedTransitions: Array<{ transitionDurationMs: number; transitionName: TransitionName }> // inputVideoPaths.length - 1
-  outputVideoPath: string
-  tempDirPath: string
-}) => {
-  // INPUT:
-  // inputVideoPaths: [0.mp4, 1.mp4, 2.mp4, 3.mp4, 4.mp4, ...]
-  // outputVideoPath: xmp4
-  // normalizedTransitions: [...]
-  // OUTPUT:
-  // [{inputVideoPaths: [0.mp4, 1.mp4], outputVideoPath: 0-1.mp4, normalizedTransitions: [srcNormalizedTransitions[0]]},{inputVideoPaths: [0-1.mp4, 2.mp4], outputVideoPath: 0-1-2.mp4, normalizedTransitions: [srcNormalizedTransitions[1]]},{inputVideoPaths: [0-1-2.mp4, 3.mp4], outputVideoPath: x.mp4, normalizedTransitions: [srcNormalizedTransitions[2]]}]
-  // Initialize the array to hold the arguments
-  const argsArray: Array<{
-    inputVideoPaths: string[]
-    outputVideoPath: string
-    normalizedTransitions: Array<{
-      transitionDurationMs: number
-      transitionName: TransitionName
-    }>
-  }> = []
-
-  // Start with the first video path
-  let lastOutputVideoPath = inputVideoPaths[0]
-
-  for (let index = 0; index < normalizedTransitions.length; index++) {
-    const transition = normalizedTransitions[index]
-    const nextInputVideoPath = inputVideoPaths[index + 1]
-
-    // Determine the output path for the current concatenation
-    const isLastTransition = index === normalizedTransitions.length - 1
-    const outputPath = isLastTransition
-      ? outputVideoPath // Use the final output path if it's the last transition
-      : path.join(
-          tempDirPath,
-          `${path.basename(lastOutputVideoPath, path.extname(lastOutputVideoPath))}-${path.basename(
-            nextInputVideoPath,
-            path.extname(nextInputVideoPath)
-          )}.mp4`
-        )
-
-    // Add the current set of arguments to the array
-    argsArray.push({
-      inputVideoPaths: [lastOutputVideoPath, nextInputVideoPath],
-      outputVideoPath: outputPath,
-      normalizedTransitions: [transition],
-    })
-
-    // Update the last output video path for the next iteration
-    lastOutputVideoPath = outputPath
-  }
-
-  return { argsArray }
-}
-
-const knowTransitionNames = [
-  'fade', // simple
-  'circleopen', // simple
-  'directionalwarp', // best
-  'directionalwipe', // best
-  'crosswarp', // best
-  'crosszoom', // best
-  'dreamy', // best
-  // 'squareswire', // bad
-  // 'angular', // bad
-  // 'radial', // bad
-  // 'cube', // bad
-  // 'swap', // bad
-] as const
-type TransitionName = (typeof knowTransitionNames)[number]
-export const concatImagesToVideoWithTransitions = async ({
-  imagesPaths,
-  durationsMs,
-  transitionDurationMs = 1_000,
-  transitionNames,
-  transitions,
-  outputVideoPath,
-  cont,
-  verbose,
-}: {
-  imagesPaths: string[]
-  durationsMs: number[]
-  transitionDurationMs?: number
-  transitionNames?: TransitionName[]
-  transitions?: Array<{ transitionDurationMs?: number; transitionName?: TransitionName }>
-  outputVideoPath: string
-  cont?: boolean
-  verbose?: boolean
-}) => {
-  const { tempDirPath, tempVideoPaths, normalizedTransitions } = await prepareImagesToVideoWithTransitions({
+  const { tempVideoPaths } = await convertImagesToVideosWithoutTransitions({
     imagesPaths,
     durationsMs,
-    transitionDurationMs,
-    transitionNames,
-    transitions,
-    outputVideoPath,
+    normalizedTransitions,
+    width,
+    height,
+    tempDirPath,
     cont,
     verbose,
   })
 
-  const { argsArray } = prepareArgumentsForConcatManyVideosWithTransitions({
-    inputVideoPaths: tempVideoPaths,
+  const { concatVideosWithTransitionsArgsArray } = await convertImagesToVideosForTransitions({
+    imagesPaths,
     normalizedTransitions,
-    outputVideoPath,
+    width,
+    height,
     tempDirPath,
+    cont,
+    verbose,
   })
 
-  for (const [index, args] of argsArray.entries()) {
+  for (const [index, args] of concatVideosWithTransitionsArgsArray.entries()) {
     await concatVideosWithTransitions({ ...args, index, cont, verbose, tempDirPath })
   }
+
+  const allVideosFilePaths: string[] = []
+  for (const [i, videoPath] of tempVideoPaths.entries()) {
+    allVideosFilePaths.push(videoPath)
+    if (i < normalizedTransitions.length) {
+      allVideosFilePaths.push(concatVideosWithTransitionsArgsArray[i].outputVideoPath)
+    }
+  }
+
+  // ASAP
+  verbose && log.normal('Concatenating all videos into a single video', { allVideosFilePaths, outputVideoPath })
+  await concatSilentVideos({ inputVideoPaths: allVideosFilePaths, outputVideoPath, verbose })
 
   // Clean up temporary video files
   verbose && log.normal('Cleaning up temporary video files')
@@ -944,6 +1095,14 @@ export const applyAssSubtitlesToVideo = async ({
 
       // Check for punctuation marks
       if (/[.!?]$/.test(wordObj.word)) {
+        sentences.push(currentSentence)
+        currentSentence = []
+        continue
+      }
+
+      // Check for too long sentences
+      const currentSentenceLength = currentSentence.reduce((acc, w) => acc + w.word.length, 0)
+      if (currentSentenceLength > 50) {
         sentences.push(currentSentence)
         currentSentence = []
         continue

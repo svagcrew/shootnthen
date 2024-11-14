@@ -247,7 +247,8 @@ Story Template
 ${storyTemplateFileContent}`)
   const userPrompt = userPromptParts.join('\n\n\n')
   const systemPrompt = `Act as a professional storyteller and craft a dynamic story based on the provided information. Expand each section of the story template into multiple short paragraphs. Do not include any titles, scene headings, or extra metadata—only the story text. Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line. This will allow for frequent image changes in the video. Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.
-After each paragraph provide additional paragraph started with text "Illustrate: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e. So illustration should not violate any rules of openai dall-e.`
+After each paragraph provide additional paragraph started with text "Illustrate: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e. So illustration should not violate any rules of openai dall-e.
+When you counting requested words count or requested paragraphs count, do not count "Illustrate: ..." paragraphs.`
   verbose && log.normal('Generating story and pictures text', { storyFilePath }, systemPrompt, userPrompt)
   const result: string = await completionByOpenai({
     userPrompt,
@@ -264,6 +265,15 @@ After each paragraph provide additional paragraph started with text "Illustrate:
   if (storyParagraphs.length !== picturesParagraphs.length) {
     await fs.writeFile(storyFilePath + '.error', result)
     throw new Error('Number of story paragraphs and pictures paragraphs should be equal')
+  }
+  if (!storyParagraphs.length) {
+    throw new Error('No story paragraphs generated')
+  }
+  const minLengthStoryParagraph = storyParagraphs.reduce((min, paragraph) => {
+    return Math.min(min, paragraph.length)
+  }, Infinity)
+  if (minLengthStoryParagraph < 20) {
+    throw new Error('Minimum length of story paragraph is less than 20 characters')
   }
   return { storyFilePath, picturesTextFilePath }
 }
@@ -296,6 +306,7 @@ export const generateStoryPictures = async ({
   const { pictureTemplateFileContent } = await parsePictureTemplateFile({ pictureTemplateFilePath })
   const { picturesParagraphs } = await parsePicturesTextFilePath({ picturesTextFilePath })
   const picturesFilePaths: string[] = []
+  const promises: Array<Promise<any>> = []
   for (const [index, pictureParagraph] of picturesParagraphs.entries()) {
     verbose && log.normal('Generating story image', { index, pictureParagraph })
     const pictureFileName = `${index}.png`
@@ -311,13 +322,16 @@ export const generateStoryPictures = async ({
     const prompt = `${pictureParagraph}.
     
 Additional instructions: ${pictureTemplateFileContent}.`
-    await imageByOpenai({
-      config,
-      imageFilePath: pictureFilePath,
-      prompt,
-      verbose,
-    })
+    promises.push(
+      imageByOpenai({
+        config,
+        imageFilePath: pictureFilePath,
+        prompt,
+        verbose,
+      })
+    )
   }
+  await Promise.all(promises)
   return {
     picturesDirPath,
     picturesFilePaths,
