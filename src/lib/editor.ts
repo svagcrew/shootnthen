@@ -1,3 +1,4 @@
+ 
 /* eslint-disable unicorn/prefer-type-error */
 import type { Config } from '@/lib/config.js'
 import { parseFileName } from '@/lib/meta.js'
@@ -6,6 +7,7 @@ import { addSuffixToFilePath, fromRawLang, replaceExt } from '@/lib/utils.js'
 import ffmpeg from 'fluent-ffmpeg'
 import { promises as fs } from 'fs'
 import langCodesLib from 'langs'
+import _ from 'lodash'
 import path from 'path'
 import sharp from 'sharp'
 import { isFileExistsSync, log, spawn } from 'svag-cli-utils'
@@ -507,6 +509,25 @@ export const getImageDimensions = async ({ imagePath }: { imagePath: string }) =
   return { width: metadata.width, height: metadata.height }
 }
 
+export const getVideoDimensions = async ({ videoPath }: { videoPath: string }) => {
+  const metadata = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) {
+        reject(err)
+      } else {
+        const width = metadata.streams[0].width
+        const height = metadata.streams[0].height
+        if (!width || !height) {
+          reject(new Error(`Unable to retrieve dimensions for video: ${videoPath}`))
+          return
+        }
+        resolve({ width, height })
+      }
+    })
+  })
+  return metadata
+}
+
 export const concatImagesToVideo = async ({
   imagesPaths,
   durationsMs,
@@ -579,6 +600,308 @@ export const concatImagesToVideo = async ({
 
   return {
     imagesPaths,
+    outputVideoPath,
+  }
+}
+
+const knowTransitionNames = [
+  'fade', // simple
+  'circleopen', // simple
+  'directionalwarp', // best
+  'directionalwipe', // best
+  'crosswarp', // best
+  'crosszoom', // best
+  'dreamy', // best
+  // 'squareswire', // bad
+  // 'angular', // bad
+  // 'radial', // bad
+  // 'cube', // bad
+  // 'swap', // bad
+] as const
+type TransitionName = (typeof knowTransitionNames)[number]
+export const concatImagesToVideoWithTransitions = async ({
+  imagesPaths,
+  durationsMs,
+  transitionDurationMs = 1_000,
+  transitionNames,
+  transitions,
+  outputVideoPath,
+  cont,
+  verbose,
+}: {
+  imagesPaths: string[]
+  durationsMs: number[]
+  transitionDurationMs?: number
+  transitionNames?: TransitionName[]
+  transitions?: Array<{ transitionDurationMs?: number; transitionName?: TransitionName }>
+  outputVideoPath: string
+  cont?: boolean
+  verbose?: boolean
+}) => {
+  // imagesPaths = imagesPaths.slice(0, 2)
+  // durationsMs = durationsMs.slice(0, 2).map(() => 2_000)
+  const normalizedTransitions: Array<{ transitionDurationMs: number; transitionName: TransitionName }> = []
+  verbose && log.normal('Concatenating images to video with transitions', { imagesPaths, outputVideoPath })
+  transitionNames = transitionNames || _.shuffle([...knowTransitionNames])
+  if (!transitions) {
+    for (const i of imagesPaths.keys()) {
+      if (i === 0) {
+        continue
+      }
+      normalizedTransitions.push({
+        transitionDurationMs,
+        transitionName: transitionNames[i % transitionNames.length],
+      })
+    }
+  } else {
+    for (const [i, transition] of transitions.entries()) {
+      normalizedTransitions.push({
+        transitionDurationMs: transition.transitionDurationMs || transitionDurationMs,
+        transitionName: transition.transitionName || transitionNames[i % transitionNames.length],
+      })
+    }
+  }
+
+  if (normalizedTransitions.length !== imagesPaths.length - 1) {
+    throw new Error('Transitions must have the same length as imagesPaths - 1')
+  }
+
+  if (imagesPaths.length !== durationsMs.length) {
+    throw new Error('Images and durations must have the same length')
+  }
+
+  if (imagesPaths.length === 0) {
+    throw new Error('No images provided for video creation')
+  }
+
+  // Get the resolution of the first image
+  const { width, height } = await getImageDimensions({ imagePath: imagesPaths[0] })
+
+  const outputVideoDirPath = path.dirname(outputVideoPath)
+  const outputVideoBaseName = path.basename(outputVideoPath, path.extname(outputVideoPath))
+  const tempDirPath = path.resolve(outputVideoDirPath, `${outputVideoBaseName}.temp`)
+  await fs.mkdir(tempDirPath, { recursive: true })
+  const getTempVideoFilePath = (index: number) => path.resolve(tempDirPath, `${index}.mp4`)
+  const tempTransitionFilePath = path.resolve(tempDirPath, `transitions.json`)
+  const tempVideoPaths: string[] = []
+
+  // Generate individual video files for each image
+  for (let i = 0; i < imagesPaths.length; i++) {
+    const imagePath = imagesPaths[i]
+    let durationMs = durationsMs[i]
+
+    // Adjust duration for transitions
+    if (i < imagesPaths.length - 1) {
+      const transitionDuration = normalizedTransitions[i].transitionDurationMs
+      durationMs += transitionDuration
+      if (durationMs < 0) {
+        throw new Error(`Duration of image at index ${i} is less than its transition duration`)
+      }
+    }
+
+    const durationSec = durationMs / 1_000
+    const tempVideoPath = getTempVideoFilePath(i)
+    tempVideoPaths.push(tempVideoPath)
+    const { fileExists } = isFileExistsSync({ filePath: tempVideoPath })
+    if (fileExists && cont) {
+      verbose && log.normal('Video file already exists', { tempVideoPath })
+      continue
+    }
+
+    // Build ffmpeg arguments
+    const ffmpegArgs = [
+      '-loop',
+      '1',
+      '-t',
+      `${durationSec}`,
+      '-i',
+      `"${imagePath}"`,
+      '-vf',
+      `"scale=${width}:${height},setsar=1"`,
+      '-c:v',
+      'libx264',
+      '-crf',
+      '24',
+      '-preset',
+      'ultrafast',
+      '-r',
+      '25',
+      '-y',
+      `"${tempVideoPath}"`,
+    ]
+
+    // Execute ffmpeg command
+    const ffmpegCommand = `ffmpeg ${ffmpegArgs.join(' ')}`
+    verbose && log.normal('Executing ffmpeg command:', ffmpegCommand)
+    await spawn({ command: ffmpegCommand, cwd: process.cwd() })
+  }
+
+  // Prepare transitions for ffmpeg-concat
+  const transitionSettings = normalizedTransitions.map((transition) => ({
+    name: transition.transitionName,
+    duration: transition.transitionDurationMs, // Convert ms to seconds
+  }))
+  await fs.writeFile(tempTransitionFilePath, JSON.stringify(transitionSettings))
+
+  // Use ffmpeg-concat to concatenate videos with transitions
+  verbose && log.normal('Concatenating videos with transitions using ffmpeg-concat')
+  const tempFilesSpaceSeparated = tempVideoPaths.map((tempVideoPath) => `'${tempVideoPath}'`).join(' ')
+  await spawn({
+    command: `ffmpeg-concat -T '${tempTransitionFilePath}' -o '${outputVideoPath}' ${tempFilesSpaceSeparated}`,
+    cwd: process.cwd(),
+  })
+
+  // Clean up temporary video files
+  verbose && log.normal('Cleaning up temporary video files')
+  await fs.rmdir(tempDirPath, { recursive: true })
+
+  verbose && log.normal('Successfully concatenated images to video with transitions', { imagesPaths, outputVideoPath })
+
+  return {
+    imagesPaths,
+    outputVideoPath,
+  }
+}
+
+export const applyAssSubtitlesToVideo = async ({
+  inputVideoPath,
+  outputVideoPath,
+  wordsTimestamps,
+  verbose,
+}: {
+  inputVideoPath: string
+  outputVideoPath: string
+  wordsTimestamps: Array<{
+    word: string
+    startMs: number
+    endMs: number
+  }>
+  verbose?: boolean
+}) => {
+  const { width, height } = await getVideoDimensions({ videoPath: inputVideoPath })
+
+  // Function to convert milliseconds to ASS time format (h:mm:ss.cc)
+  const msToAssTime = (ms: number): string => {
+    const totalSeconds = ms / 1_000
+    const hours = Math.floor(totalSeconds / 3_600)
+    const minutes = Math.floor((totalSeconds % 3_600) / 60)
+    const seconds = Math.floor(totalSeconds % 60)
+    const centiseconds = Math.floor((totalSeconds * 100) % 100)
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(
+      2,
+      '0'
+    )}.${String(centiseconds).padStart(2, '0')}`
+  }
+
+  // Function to split words into sentences
+  const splitWordsIntoSentences = (
+    wordsTimestamps: Array<{
+      word: string
+      startMs: number
+      endMs: number
+    }>
+  ) => {
+    const sentences = []
+    let currentSentence = []
+    const timeGapThreshold = 700 // milliseconds
+
+    for (let i = 0; i < wordsTimestamps.length; i++) {
+      const wordObj = wordsTimestamps[i]
+      currentSentence.push(wordObj)
+
+      // Check for punctuation marks
+      if (/[.!?]$/.test(wordObj.word)) {
+        sentences.push(currentSentence)
+        currentSentence = []
+        continue
+      }
+
+      // Check time gap if not at the last word
+      if (i < wordsTimestamps.length - 1) {
+        const nextWordObj = wordsTimestamps[i + 1]
+        const gap = nextWordObj.startMs - wordObj.endMs
+        if (gap > timeGapThreshold) {
+          sentences.push(currentSentence)
+          currentSentence = []
+        }
+      }
+    }
+    if (currentSentence.length > 0) {
+      sentences.push(currentSentence)
+    }
+    return sentences
+  }
+
+  // Generate ASS subtitle content
+  const generateAssSubtitleContent = () => {
+    const fontSize = Math.ceil(width / 18)
+    const margin = fontSize
+    const assHeader = `[Script Info]
+Title: Generated by applyNiceSubtitlesToVideo
+ScriptType: v4.00+
+PlayResX: ${width}
+PlayResY: ${height}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name,    Fontname,     Fontsize,    PrimaryColour,     SecondaryColour,    OutlineColour,      BackColour,     Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow,  Alignment, MarginL,   MarginR,   MarginV,    Encoding
+Style:  Default, ArialBlack,   ${fontSize}, &H00FFFFFF,        &H000000FF,         &H00000000,         &H00000000,     1,    0,      0,         0,         100,    100,    0,       0,     0,           10,      0,       2,         ${margin}, ${margin}, ${margin},  1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`
+
+    // Split words into sentences
+    const sentences = splitWordsIntoSentences(wordsTimestamps)
+
+    const dialogueEvents = []
+
+    for (const sentenceWords of sentences) {
+      // const sentenceText = sentenceWords.map((w) => w.word).join(' ')
+
+      for (let index = 0; index < sentenceWords.length; index++) {
+        const currentWordObj = sentenceWords[index]
+        const nextWordObj = sentenceWords[index + 1]
+        const currentWordStart = msToAssTime(currentWordObj.startMs)
+        const currentWordEnd = msToAssTime(currentWordObj.endMs)
+        const nextWordStart = nextWordObj ? msToAssTime(nextWordObj.startMs) : currentWordEnd
+
+        // Build the text with the current word highlighted
+        const text = sentenceWords
+          .map((w, i) => {
+            if (i === index) {
+              // Highlight current word (e.g., change color to red)
+              return `{\\c&H00FFFF&}${w.word}{\\c&HFFFFFF&}`
+            } else {
+              return w.word
+            }
+          })
+          .join(' ')
+
+        dialogueEvents.push(`Dialogue: 0,${currentWordStart},${nextWordStart},Default,,0,0,0,,${text}`)
+      }
+    }
+
+    return assHeader + dialogueEvents.join('\n')
+  }
+
+  const assContent = generateAssSubtitleContent()
+
+  // Write the ASS content to a temporary file
+  const outputVideoDirPath = path.dirname(outputVideoPath)
+  const outputVideoBasename = path.basename(outputVideoPath, path.extname(outputVideoPath))
+  const assFilePath = path.resolve(outputVideoDirPath, `${outputVideoBasename}.ass`)
+  await fs.writeFile(assFilePath, assContent, 'utf8')
+
+  // Use ffmpeg to overlay the subtitles onto the video
+  verbose && log.normal('Applying ass subtitles to video')
+  // allow override
+  const ffmpegCommand = `ffmpeg -i "${inputVideoPath}" -vf "ass='${assFilePath}'" -c:a copy "${outputVideoPath}" -y`
+  await spawn({ command: ffmpegCommand, cwd: process.cwd() })
+  verbose && log.normal('Applyed ass subtitles to video')
+  return {
+    inputVideoPath,
     outputVideoPath,
   }
 }

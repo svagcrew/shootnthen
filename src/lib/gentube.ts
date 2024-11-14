@@ -1,7 +1,14 @@
+/* eslint-disable @typescript-eslint/no-loop-func */
 /* eslint-disable radix */
 import type { Config } from '@/exports.js'
 import { ttsMegasimpleByAzureai } from '@/lib/azureai.js'
-import { concatAudios, concatImagesToVideo, getAudioDuration } from '@/lib/editor.js'
+import {
+  applyAssSubtitlesToVideo,
+  concatAudios,
+  concatImagesToVideo,
+  concatImagesToVideoWithTransitions,
+  getAudioDuration,
+} from '@/lib/editor.js'
 import { ttsMegasimpleWithTimestampsByElevenlabs } from '@/lib/elevenlabs.general.js'
 import { completionByOpenai, imageByOpenai } from '@/lib/openai.js'
 import { youtube } from '@/lib/youtube.js'
@@ -10,6 +17,7 @@ import Handlebars from 'handlebars'
 import _ from 'lodash'
 import path from 'path'
 import { isDirExists, isFileExists, log } from 'svag-cli-utils'
+import z from 'zod'
 
 Handlebars.registerHelper('coalesce', (a, b) => {
   return a ? a : b
@@ -406,6 +414,7 @@ export const generateStoryAudio = async ({
   verbose && log.normal('Generating story audio', { audioFilePath, audioPartsDirPath })
   const audioPartFilePathsRaw = await fs.readdir(audioPartsDirPath)
   const audioPartFilePaths = audioPartFilePathsRaw
+    .filter((audioPartFilePath) => audioPartFilePath.endsWith('.mp3'))
     .map((audioPartFilePath) => {
       const index = parseInt(path.basename(audioPartFilePath).split('.')[0])
       return { index, audioPartFilePath }
@@ -427,6 +436,8 @@ export const generateStoryVideoByPictures = async ({
   videoFilePath,
   picturesDirPath,
   audioPartsDirPath,
+  withTransition = true,
+  cont,
   verbose,
   force,
 }: {
@@ -434,6 +445,8 @@ export const generateStoryVideoByPictures = async ({
   videoFilePath: string
   picturesDirPath: string
   audioPartsDirPath: string
+  withTransition?: boolean
+  cont?: boolean
   verbose?: boolean
   force?: boolean
 }) => {
@@ -459,6 +472,7 @@ export const generateStoryVideoByPictures = async ({
 
   const audioPartFilePathsRaw = await fs.readdir(audioPartsDirPath)
   const audioPartFilePaths = audioPartFilePathsRaw
+    .filter((audioPartFilePath) => audioPartFilePath.endsWith('.mp3'))
     .map((audioPartFilePath) => {
       const index = parseInt(path.basename(audioPartFilePath).split('.')[0])
       return { index, audioPartFilePath }
@@ -470,12 +484,22 @@ export const generateStoryVideoByPictures = async ({
     const audioPartDuration = await getAudioDuration({ audioPath: audioPartFilePath })
     durationsMs.push(audioPartDuration)
   }
-  await concatImagesToVideo({
-    imagesPaths: picturesPaths,
-    durationsMs,
-    outputVideoPath: videoFilePath,
-    verbose,
-  })
+  if (withTransition) {
+    await concatImagesToVideoWithTransitions({
+      imagesPaths: picturesPaths,
+      durationsMs,
+      cont,
+      outputVideoPath: videoFilePath,
+      verbose,
+    })
+  } else {
+    await concatImagesToVideo({
+      imagesPaths: picturesPaths,
+      durationsMs,
+      outputVideoPath: videoFilePath,
+      verbose,
+    })
+  }
   return {
     audioPartFilePaths: picturesPaths,
   }
@@ -548,4 +572,188 @@ export const getNextEpisodeNumber = async ({ episodesDir, config }: { episodesDi
   const lastEpisodeNumber = episodesPaths[episodesPaths.length - 1]
   const nextEpisodeNumber = lastEpisodeNumber + 1
   return { lastEpisodeNumber, nextEpisodeNumber }
+}
+
+export const getStoryWordsTimestamps = async ({
+  audioPartsDirPath,
+  config,
+}: {
+  audioPartsDirPath: string
+  config: Config
+}) => {
+  audioPartsDirPath = path.resolve(config.contentDir, audioPartsDirPath)
+  const audioPartFilePathsRaw = await fs.readdir(audioPartsDirPath)
+  const audioPartFilePaths = audioPartFilePathsRaw
+    .filter((audioPartFilePath) => audioPartFilePath.endsWith('.json'))
+    .map((audioPartFilePath) => {
+      const index = parseInt(path.basename(audioPartFilePath).split('.')[0])
+      return { index, audioPartFilePath }
+    })
+    .sort((a, b) => a.index - b.index)
+    .map(({ audioPartFilePath }) => path.resolve(audioPartsDirPath, audioPartFilePath))
+  const audioPartFileDataRaws = await Promise.all(
+    audioPartFilePaths.map(async (audioPartFilePath) => {
+      const audioPartFileData = await fs.readFile(audioPartFilePath, 'utf-8')
+      return { info: JSON.parse(audioPartFileData), filePath: audioPartFilePath }
+    })
+  )
+  const partCharactersInfo: Array<{
+    characters: string[]
+    character_start_times_seconds: number[]
+    character_end_times_seconds: number[]
+  }> = []
+  if (audioPartFileDataRaws.length === 0) {
+    throw new Error('No audio part files found')
+  }
+  for (const [, audioPartFileDataRaw] of audioPartFileDataRaws.entries()) {
+    const audioPartInfoParseResult = z
+      .object({
+        characters: z.array(z.string()),
+        character_start_times_seconds: z.array(z.number()),
+        character_end_times_seconds: z.array(z.number()),
+      })
+      .safeParse(audioPartFileDataRaw.info)
+    if (!audioPartInfoParseResult.success) {
+      throw new Error(
+        `Invalid audio part file data: ${audioPartFileDataRaw.filePath}, because ${audioPartInfoParseResult.error}`
+      )
+    }
+    if (
+      audioPartInfoParseResult.data.characters.length !==
+      audioPartInfoParseResult.data.character_start_times_seconds.length
+    ) {
+      throw new Error(
+        `Invalid audio part file data: ${audioPartFileDataRaw.filePath}, because character_start_times_seconds length is not equal to characters length`
+      )
+    }
+    if (
+      audioPartInfoParseResult.data.characters.length !==
+      audioPartInfoParseResult.data.character_end_times_seconds.length
+    ) {
+      throw new Error(
+        `Invalid audio part file data: ${audioPartFileDataRaw.filePath}, because character_end_times_seconds length is not equal to characters length`
+      )
+    }
+    partCharactersInfo.push(audioPartInfoParseResult.data)
+  }
+  const fullCharactersInfo: {
+    characters: string[]
+    character_start_times_seconds: number[]
+    character_end_times_seconds: number[]
+  } = {
+    characters: [],
+    character_start_times_seconds: [],
+    character_end_times_seconds: [],
+  }
+  let lastCharacterEndTime = 0
+  for (const partCharactersInfoItem of partCharactersInfo) {
+    const partCharactersInfoItemWithOffsets = {
+      ...partCharactersInfoItem,
+      character_start_times_seconds: partCharactersInfoItem.character_start_times_seconds.map(
+        (time) => time + lastCharacterEndTime
+      ),
+      character_end_times_seconds: partCharactersInfoItem.character_end_times_seconds.map(
+        (time) => time + lastCharacterEndTime
+      ),
+    }
+    lastCharacterEndTime =
+      partCharactersInfoItemWithOffsets.character_end_times_seconds[
+        partCharactersInfoItemWithOffsets.character_end_times_seconds.length - 1
+      ]
+    fullCharactersInfo.characters.push(...partCharactersInfoItemWithOffsets.characters)
+    fullCharactersInfo.character_start_times_seconds.push(
+      ...partCharactersInfoItemWithOffsets.character_start_times_seconds
+    )
+    fullCharactersInfo.character_end_times_seconds.push(
+      ...partCharactersInfoItemWithOffsets.character_end_times_seconds
+    )
+  }
+  const wordsTimestamps: Array<{
+    word: string
+    startMs: number
+    endMs: number
+  }> = []
+
+  let currentWord = ''
+  let wordStartSeconds: number | null = null
+  let wordEndSeconds: number | null = null
+
+  for (let i = 0; i < fullCharactersInfo.characters.length; i++) {
+    const character = fullCharactersInfo.characters[i]
+    const startSeconds = fullCharactersInfo.character_start_times_seconds[i]
+    const endSeconds = fullCharactersInfo.character_end_times_seconds[i]
+
+    if (character.trim() === '') {
+      // Character is whitespace
+      if (currentWord !== '') {
+        // End of a word
+        wordsTimestamps.push({
+          word: currentWord,
+          startMs: Math.floor((wordStartSeconds as number) * 1_000),
+          endMs: Math.floor((wordEndSeconds as number) * 1_000),
+        })
+        currentWord = ''
+        wordStartSeconds = null
+        wordEndSeconds = null
+      }
+    } else {
+      // Character is not whitespace
+      if (currentWord === '') {
+        // Start of a new word
+        wordStartSeconds = startSeconds
+      }
+      currentWord += character
+      wordEndSeconds = endSeconds
+    }
+  }
+
+  // After loop, check if any word remains
+  if (currentWord !== '') {
+    wordsTimestamps.push({
+      word: currentWord,
+      startMs: Math.floor((wordStartSeconds as number) * 1_000),
+      endMs: Math.floor((wordEndSeconds as number) * 1_000),
+    })
+  }
+  return { wordsTimestamps }
+}
+
+export const applyAssSubtitlesToStoryVideo = async ({
+  config,
+  inputVideoPath,
+  outputVideoPath,
+  audioPartsDirPath,
+  verbose,
+  force,
+}: {
+  config: Config
+  inputVideoPath: string
+  outputVideoPath: string
+  audioPartsDirPath: string
+  verbose?: boolean
+  force?: boolean
+}) => {
+  inputVideoPath = path.resolve(config.contentDir, inputVideoPath)
+  outputVideoPath = path.resolve(config.contentDir, outputVideoPath)
+  audioPartsDirPath = path.resolve(config.contentDir, audioPartsDirPath)
+  const { fileExists: inputVideoFileExists } = await isFileExists({ filePath: inputVideoPath })
+  if (!inputVideoFileExists) {
+    throw new Error(`Input video file does not exist: ${inputVideoPath}`)
+  }
+  const { fileExists: outputVideoFileExists } = await isFileExists({ filePath: outputVideoPath })
+  if (outputVideoFileExists && !force) {
+    throw new Error(`Output video file already exists: ${outputVideoPath}`)
+  }
+  const { wordsTimestamps } = await getStoryWordsTimestamps({ audioPartsDirPath, config })
+  verbose &&
+    log.normal('Applying ass subtitles to story video', {
+      inputVideoFilePath: inputVideoPath,
+      outputVideoFilePath: outputVideoPath,
+    })
+  return await applyAssSubtitlesToVideo({
+    inputVideoPath,
+    outputVideoPath,
+    wordsTimestamps,
+    verbose,
+  })
 }

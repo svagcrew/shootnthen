@@ -137,10 +137,11 @@ export const parseFileName = (fileName: string) => {
   return { name, langsProcessed, langsRaw, langs, marks, notLangMarks, ext, langSingle, basename, dirname }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const getMetaFilePath = ({ filePath, config }: { filePath: string; config: Config }) => {
   const parsed = parseFileName(filePath)
   const metaFileName = `${parsed.name}.json`
-  const metaFilePath = path.resolve(config.contentDir, metaFileName)
+  const metaFilePath = path.resolve(parsed.dirname, metaFileName)
   return { metaFilePath }
 }
 

@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-/* eslint-disable no-useless-catch */
+ 
 import { getEnv } from '@/lib/env.js'
 import axios from 'axios'
 import { promises as fs } from 'fs'

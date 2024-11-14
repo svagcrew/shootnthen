@@ -8,6 +8,7 @@ import { elevenlabs } from '@/lib/elevenlabs.dubbing.js'
 import { getVoicesElevenlabs } from '@/lib/elevenlabs.general.js'
 import { removeVideosAndAudios } from '@/lib/fs.js'
 import {
+  applyAssSubtitlesToStoryVideo,
   generateStoryAndPicturesTexts,
   generateStoryAudio,
   generateStoryAudioParts,
@@ -1491,7 +1492,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
     case 'story-pictures-video':
     case 'spv': {
-      const { videoFilePath, picturesDirPath, audioPartsDirPath } = z
+      const { videoFilePath, picturesDirPath, audioPartsDirPath, cont } = z
         .object({
           videoFilePath: z.string().min(1),
           picturesDirPath: z.string().min(1),
@@ -1514,12 +1515,56 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['audios-parts-dir', 'a'],
             coalesce: undefined,
           }),
+          cont: getFlagAsBoolean({
+            flags,
+            keys: ['cont'],
+            coalesce: false,
+          }),
         })
       const result = await generateStoryVideoByPictures({
         config,
         videoFilePath,
         picturesDirPath,
         audioPartsDirPath,
+        cont,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-ass-video':
+    case 'sav': {
+      const { inputVideoPath, outputVideoPath, audioPartsDirPath } = z
+        .object({
+          inputVideoPath: z.string().min(1),
+          outputVideoPath: z.string().min(1),
+          audioPartsDirPath: z.string().min(1),
+          cont: z.boolean().optional(),
+        })
+        .parse({
+          inputVideoPath: getFlagAsString({
+            flags,
+            keys: ['input', 'i'],
+            coalesce: undefined,
+          }),
+          outputVideoPath: getFlagAsString({
+            flags,
+            keys: ['output', 'o'],
+            coalesce: undefined,
+          }),
+          audioPartsDirPath: getFlagAsString({
+            flags,
+            keys: ['audios-parts-dir', 'a'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await applyAssSubtitlesToStoryVideo({
+        config,
+        audioPartsDirPath,
+        inputVideoPath,
+        outputVideoPath,
         verbose,
         force,
       })
@@ -1658,6 +1703,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const picturesDirPath = path.resolve(episodeDir, 'pictures')
       const audioPartsDirPath = path.resolve(episodeDir, 'audio-parts')
       const audioFilePath = path.resolve(episodeDir, `story.en.mp3`)
+      const videoNoassSilentFilePath = path.resolve(episodeDir, `story.noass.mp4`)
       const videoSilentFilePath = path.resolve(episodeDir, `story.mp4`)
       const videoFilePath = path.resolve(episodeDir, `story.en.mp4`)
       const storyTemplateFilePath = path.resolve(generalDir, 'storyTemplate.txt')
@@ -1672,6 +1718,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const picturesDirPathShrt = shrt(picturesDirPath)
       const audioPartsDirPathShrt = shrt(audioPartsDirPath)
       const audioFilePathShrt = shrt(audioFilePath)
+      const videoNoassSilentFilePathShrt = shrt(videoNoassSilentFilePath)
       const videoSilentFilePathShrt = shrt(videoSilentFilePath)
       const videoFilePathShrt = shrt(videoFilePath)
       const storyTemplateFilePathShrt = shrt(storyTemplateFilePath)
@@ -1689,21 +1736,23 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       // snt sp -p episodes/2/pictures.txt -t general/pictureTemplate.txt -o episodes/2/pictures --cont && \
       // snt sap -l en -s episodes/2/story.txt -o episodes/2/audio-parts --cont && \
       // snt saf -d episodes/2/audio-parts -o episodes/2/story.en.mp3 && \
-      // snt spv -p episodes/2/pictures -a episodes/2/audio-parts -o episodes/2/story.mp4 && \
+      // snt spv -p episodes/2/pictures -a episodes/2/audio-parts -o episodes/2/story.noass.mp4 --cont && \
+      // snt sav -i episodes/2/story.noass.mp4 -o episodes/0/story.mp4 -a episodes/2/audio-parts && \
       // snt aa episodes/2/story.mp4 -l en && \
       // snt syu -v episodes/2/story.en.mp4 -t episodes/2/title.txt -d episodes/2/description.txt
       let lastCommandIndex = -1
       const commands = [
         pickIndexAsEpisodeNumber
-          ? `snt stp -i ${itemsFilePathShrt} -k episodes/${episodeNumber} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt}`
-          : `snt stp -i ${itemsFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt}`,
-        `snt st -s ${storyFilePathShrt} -o ${titleFilePathShrt}`,
-        `snt sd -s ${storyFilePathShrt} -o ${descriptionFilePathShrt}`,
-        `snt sp -p ${picturesTextFilePathShrt} -t ${pictureTemplateFilePathShrt} -o ${picturesDirPathShrt} --cont`,
-        `snt sap -l ${srcLang} -s ${storyFilePathShrt} -o ${audioPartsDirPathShrt} --cont`,
-        `snt saf -d ${audioPartsDirPathShrt} -o ${audioFilePathShrt}`,
-        `snt spv -p ${picturesDirPathShrt} -a ${audioPartsDirPathShrt} -o ${videoSilentFilePathShrt}`,
-        `snt aa ${videoSilentFilePathShrt} -l ${srcLang}`,
+          ? `snt stp -i ${itemsFilePathShrt} -k episodes/${episodeNumber} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`
+          : `snt stp -i ${itemsFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`,
+        `snt st -s ${storyFilePathShrt} -o ${titleFilePathShrt} && \\`,
+        `snt sd -s ${storyFilePathShrt} -o ${descriptionFilePathShrt} && \\`,
+        `snt sp -p ${picturesTextFilePathShrt} -t ${pictureTemplateFilePathShrt} -o ${picturesDirPathShrt} --cont && \\`,
+        `snt sap -l ${srcLang} -s ${storyFilePathShrt} -o ${audioPartsDirPathShrt} --cont && \\`,
+        `snt saf -d ${audioPartsDirPathShrt} -o ${audioFilePathShrt} && \\`,
+        `snt spv -p ${picturesDirPathShrt} -a ${audioPartsDirPathShrt} -o ${videoNoassSilentFilePathShrt} --cont && \\`,
+        `snt sav -i ${videoNoassSilentFilePathShrt} -o ${videoSilentFilePathShrt} -a ${audioPartsDirPathShrt} && \\`,
+        `snt aa ${videoSilentFilePathShrt} -l ${srcLang} && \\`,
         `snt syu -v ${videoFilePathShrt} -t ${titleFilePathShrt} -d ${descriptionFilePathShrt}`,
       ]
 
@@ -1801,8 +1850,21 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         lastCommandIndex++
         await generateStoryVideoByPictures({
           config,
-          videoFilePath: videoSilentFilePath,
+          videoFilePath: videoNoassSilentFilePath,
           picturesDirPath,
+          audioPartsDirPath,
+          verbose,
+          cont: true,
+          force,
+        })
+
+        // Step 7,5
+        // snt sav -i episodes/2/story.noass.mp4 -o episodes/0/story.mp4 -a episodes/2/audio-parts
+        lastCommandIndex++
+        await applyAssSubtitlesToStoryVideo({
+          config,
+          inputVideoPath: videoNoassSilentFilePath,
+          outputVideoPath: videoFilePath,
           audioPartsDirPath,
           verbose,
           force,
