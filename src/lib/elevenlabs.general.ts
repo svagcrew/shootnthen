@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
- 
+
 import { getEnv } from '@/lib/env.js'
 import axios from 'axios'
 import { promises as fs } from 'fs'
@@ -19,7 +19,6 @@ export const getVoicesElevenlabs = async () => {
   try {
     const response = await axios.get(url, { headers })
     const data = response.data
-    await fs.writeFile('elevenlabs.voices.json', JSON.stringify(data, null, 2))
     return data
   } catch (error) {
     throw new Error(`Error fetching voices: ${error}`)
