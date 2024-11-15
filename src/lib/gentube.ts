@@ -134,7 +134,7 @@ export const generateStoryTitle = async ({
     throw new Error(`Title file already exists: ${titleFilePath}`)
   }
   const { storyFileContent } = await parseStoryFile({ storyFilePath })
-  const systemPrompt = `Act as youtube video title generator and generate a title for the story. Reply with a single sentence that would make a compelling title for a video based on the story. User will provide the story text.`
+  const systemPrompt = `Act as youtube video title generator and generate a title for the story. Reply with a single sentence that would make a compelling title for a video based on the story. User will provide the story text. Title should be short, just from 3 to 8 words`
   const userPrompt = storyFileContent
   verbose && log.normal('Generating story title')
   const resultRaw: string = await completionByOpenai({
@@ -245,25 +245,53 @@ ${worldFileContent}`)
 Story Template
 ===============
 ${storyTemplateFileContent}`)
-  const userPrompt = userPromptParts.join('\n\n\n')
-  const systemPrompt = `Act as a professional storyteller and craft a dynamic story based on the provided information. Expand each section of the story template into multiple short paragraphs. Do not include any titles, scene headings, or extra metadata—only the story text. Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line. This will allow for frequent image changes in the video. Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.
-After each paragraph provide additional paragraph started with text "Illustrate: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e. So illustration should not violate any rules of openai dall-e.
-When you counting requested words count or requested paragraphs count, do not count "Illustrate: ..." paragraphs.`
-  verbose && log.normal('Generating story and pictures text', { storyFilePath }, systemPrompt, userPrompt)
-  const result: string = await completionByOpenai({
-    userPrompt,
-    systemPrompt,
+  //   const userPrompt = userPromptParts.join('\n\n\n')
+  //   const systemPrompt = `Act as a professional storyteller and craft a dynamic story based on the provided information. Expand each section of the story template into multiple short paragraphs. Do not include any titles, scene headings, or extra metadata—only the story text. Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line. This will allow for frequent image changes in the video. Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.
+  // After each paragraph provide additional paragraph started with text "Illustrate: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e. So illustration should not violate any rules of openai dall-e.
+  // When you counting requested words count or requested paragraphs count, do not count "Illustrate: ..." paragraphs.`
+  //   verbose && log.normal('Generating story and pictures text', { storyFilePath }, systemPrompt, userPrompt)
+  //   const result: string = await completionByOpenai({
+  //     userPrompt,
+  //     systemPrompt,
+  //     model: 'o1-preview',
+  //   })
+  //   const resultParagraphs = result.split(/\n+/)
+  //   const storyParagraphs: string[] = resultParagraphs.filter((paragraph) => !paragraph.startsWith('Illustrate:'))
+  //   const picturesParagraphs: string[] = resultParagraphs.filter((paragraph) => paragraph.startsWith('Illustrate:'))
+
+  const userPromptStory = userPromptParts.join('\n\n\n')
+  const systemPromptStory = `Act as a professional storyteller and craft a dynamic story based on the provided information.
+Expand each section of the story template into multiple short paragraphs.
+Do not include any titles, scene headings, or extra metadata—only the story text.
+Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line.
+This will allow for frequent image changes in the video.
+Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.`
+  verbose && log.normal('Generating story', { storyFilePath }, systemPromptStory, userPromptStory)
+  const resultStory: string = await completionByOpenai({
+    userPrompt: userPromptStory,
+    systemPrompt: systemPromptStory,
     model: 'o1-preview',
   })
-  const resultParagraphs = result.split(/\n+/)
-  const storyParagraphs: string[] = resultParagraphs.filter((paragraph) => !paragraph.startsWith('Illustrate:'))
-  const picturesParagraphs: string[] = resultParagraphs.filter((paragraph) => paragraph.startsWith('Illustrate:'))
+  const storyParagraphs = resultStory.split(/\n+/)
+
+  const userPromptPictures = storyParagraphs.map((paragraph, i) => `Paragraph ${i + 1}: ${paragraph}`).join('\n\n')
+  const systemPromptPictures = `Act as picture generation prompter and generate pictures for each paragraph of the story provided by user.
+Each prompt should be separate paragraph started with text "Illustrate N: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e.
+Count of illustration prompt paragraphs should be equal to count of story paragraphs.`
+  verbose && log.normal('Generating pictures prompts', { storyFilePath }, systemPromptPictures, userPromptPictures)
+  const resultPictures: string = await completionByOpenai({
+    userPrompt: userPromptPictures,
+    systemPrompt: systemPromptPictures,
+    model: 'o1-preview',
+  })
+  const picturesParagraphs = resultPictures.split(/\n+/).map((paragraph) => paragraph.replace(/^Illustrate \d+: /, ''))
+
   const storyFileContent = storyParagraphs.join('\n\n')
   const picturesFileContent = picturesParagraphs.join('\n\n')
   await fs.writeFile(storyFilePath, storyFileContent)
   await fs.writeFile(picturesTextFilePath, picturesFileContent)
   if (storyParagraphs.length !== picturesParagraphs.length) {
-    await fs.writeFile(storyFilePath + '.error', result)
+    await fs.writeFile(storyFilePath + '.error', resultStory)
     throw new Error('Number of story paragraphs and pictures paragraphs should be equal')
   }
   if (!storyParagraphs.length) {
