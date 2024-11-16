@@ -96,6 +96,11 @@ export const parsePictureTemplateFile = async ({ pictureTemplateFilePath }: { pi
   return { pictureTemplateFileContent }
 }
 
+export const parseIntroFile = async ({ introFilePath }: { introFilePath: string }) => {
+  const introFileContent = await fs.readFile(introFilePath, 'utf-8')
+  return { introFileContent }
+}
+
 export const parseStoryFile = async ({ storyFilePath }: { storyFilePath: string }) => {
   const storyFileContent = await fs.readFile(storyFilePath, 'utf-8')
   const storyParagraphs = storyFileContent.split(/\n+/)
@@ -187,7 +192,7 @@ export const generateStoryDescription = async ({
   return { descriptionFilePath }
 }
 
-export const generateStoryAndPicturesTexts = async ({
+export const generateStoryAndIntroAndPicturesTexts = async ({
   config,
   characterFilePath,
   worldFilePath,
@@ -196,7 +201,9 @@ export const generateStoryAndPicturesTexts = async ({
   itemsFilePath,
   pickIndex,
   storyFilePath,
+  introFilePath,
   picturesTextFilePath,
+  cont,
   verbose,
   force,
 }: {
@@ -207,8 +214,11 @@ export const generateStoryAndPicturesTexts = async ({
   separate?: boolean
   itemsFilePath?: string
   pickIndex?: number[]
+  minWordsCount?: number
   storyFilePath: string
+  introFilePath: string
   picturesTextFilePath: string
+  cont?: boolean
   verbose?: boolean
   force?: boolean
 }) => {
@@ -216,16 +226,21 @@ export const generateStoryAndPicturesTexts = async ({
   worldFilePath = worldFilePath && path.resolve(config.contentDir, worldFilePath)
   storyTemplateFilePath = path.resolve(config.contentDir, storyTemplateFilePath)
   storyFilePath = path.resolve(config.contentDir, storyFilePath)
+  introFilePath = path.resolve(config.contentDir, introFilePath)
   picturesTextFilePath = path.resolve(config.contentDir, picturesTextFilePath)
   const storyFileDir = path.dirname(storyFilePath)
   await fs.mkdir(storyFileDir, { recursive: true })
   const { fileExists: storyFileExists } = await isFileExists({ filePath: storyFilePath })
   const { fileExists: picturesFileExists } = await isFileExists({ filePath: picturesTextFilePath })
-  if (storyFileExists && !force) {
+  const { fileExists: introFilePathExists } = await isFileExists({ filePath: introFilePath })
+  if (storyFileExists && !force && !cont) {
     throw new Error(`Story file already exists: ${storyFilePath}`)
   }
-  if (picturesFileExists && !force) {
+  if (picturesFileExists && !force && !cont) {
     throw new Error(`Pictures file already exists: ${picturesTextFilePath}`)
+  }
+  if (picturesFileExists && !force && !cont) {
+    throw new Error(`Intro file already exists: ${introFilePathExists}`)
   }
   const userPromptParts: string[] = []
   const { characterFileContent } = characterFilePath
@@ -249,10 +264,15 @@ Story Template
 ${storyTemplateFileContent}`)
   const { storyParagraphs, picturesParagraphs } = await (async () => {
     if (!separate) {
+      if (storyFileExists && picturesFileExists && cont) {
+        const { storyParagraphs } = await parseStoryFile({ storyFilePath })
+        const { picturesParagraphs } = await parsePicturesTextFilePath({ picturesTextFilePath })
+        return { storyParagraphs, picturesParagraphs }
+      }
       const userPrompt = userPromptParts.join('\n\n\n')
       const systemPrompt = `Act as a professional storyteller and craft a dynamic story based on the provided information. Expand each section of the story template into multiple short paragraphs. Do not include any titles, scene headings, or extra metadata—only the story text. Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line. This will allow for frequent image changes in the video. Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.
-  After each paragraph provide additional paragraph started with text "Illustrate: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e. So illustration should not violate any rules of openai dall-e.
-  When you counting requested words count or requested paragraphs count, do not count "Illustrate: ..." paragraphs.`
+After each paragraph provide additional paragraph started with text "Illustrate: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e. So illustration should not violate any rules of openai dall-e.
+When you counting requested words count or requested paragraphs count, do not count "Illustrate: ..." paragraphs.`
       verbose && log.normal('Generating story and pictures text', { storyFilePath }, systemPrompt, userPrompt)
       const result: string = await completionByOpenai({
         userPrompt,
@@ -264,44 +284,80 @@ ${storyTemplateFileContent}`)
       const picturesParagraphs: string[] = resultParagraphs.filter((paragraph) => paragraph.startsWith('Illustrate:'))
       return { storyParagraphs, picturesParagraphs }
     } else {
-      const userPromptStory = userPromptParts.join('\n\n\n')
-      const systemPromptStory = `Act as a professional storyteller and craft a dynamic story based on the provided information.
-    Expand each section of the story template into multiple short paragraphs.
-    Do not include any titles, scene headings, or extra metadata—only the story text.
-    Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line.
-    This will allow for frequent image changes in the video.
-    Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.`
-      verbose && log.normal('Generating story', { storyFilePath }, systemPromptStory, userPromptStory)
-      const resultStory: string = await completionByOpenai({
-        userPrompt: userPromptStory,
-        systemPrompt: systemPromptStory,
-        model: 'o1-preview',
-      })
-      const storyParagraphs = resultStory.split(/\n+/)
+      const storyParagraphs = await (async () => {
+        if (storyFileExists && cont) {
+          const { storyParagraphs } = await parseStoryFile({ storyFilePath })
+          return storyParagraphs
+        }
 
-      const userPromptPictures = storyParagraphs.map((paragraph, i) => `Paragraph ${i + 1}: ${paragraph}`).join('\n\n')
-      const systemPromptPictures = `Act as picture generation prompter and generate pictures for each paragraph of the story provided by user.
-    Each prompt should be separate paragraph started with text "Illustrate N: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e.
-    Count of illustration prompt paragraphs should be equal to count of story paragraphs.`
-      verbose && log.normal('Generating pictures prompts', { storyFilePath }, systemPromptPictures, userPromptPictures)
-      const resultPictures: string = await completionByOpenai({
-        userPrompt: userPromptPictures,
-        systemPrompt: systemPromptPictures,
-        model: 'o1-preview',
-      })
-      const picturesParagraphs = resultPictures
-        .split(/\n+/)
-        .map((paragraph) => paragraph.replace(/^Illustrate \d+: /, ''))
+        const userPromptStory = userPromptParts.join('\n\n\n')
+        const systemPromptStory = `Act as a professional storyteller and craft a dynamic story based on the provided information.
+  Expand each section of the story template into multiple short paragraphs.
+  Do not include any titles, scene headings, or extra metadata—only the story text.
+  Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line.
+  This will allow for frequent image changes in the video.
+  Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.`
+        verbose && log.normal('Generating story', { storyFilePath }, systemPromptStory, userPromptStory)
+        const resultStory: string = await completionByOpenai({
+          userPrompt: userPromptStory,
+          systemPrompt: systemPromptStory,
+          model: 'o1-preview',
+        })
+
+        return resultStory.split(/\n+/)
+      })()
+
+      const picturesParagraphs = await (async () => {
+        if (picturesFileExists && cont) {
+          const { picturesParagraphs } = await parsePicturesTextFilePath({ picturesTextFilePath })
+          return picturesParagraphs
+        }
+
+        const userPromptPictures = storyParagraphs.map((paragraph, i) => `${i + 1}: ${paragraph}`).join('\n\n')
+        const systemPromptPictures = `Act as picture generation prompter and generate pictures for each numerated paragraph of the story provided by user.
+Each illustartion prompt should fully describe the picture with included context to each paragraph, so it can be used as a standalone prompt for openai dall-e.
+Each prompt should be separate paragraph started with text "N: ..." and describe what should be on the picture, this will be used to generate images for the story with openai dall-e.
+Count of illustration prompt paragraphs should be equal to count of story paragraphs.`
+        verbose &&
+          log.normal('Generating pictures prompts', { storyFilePath }, systemPromptPictures, userPromptPictures)
+        const resultPictures: string = await completionByOpenai({
+          userPrompt: userPromptPictures,
+          systemPrompt: systemPromptPictures,
+          model: 'o1-preview',
+        })
+        const picturesParagraphs = resultPictures.split(/\n+/).map((paragraph) => paragraph.replace(/^\d+: /, ''))
+        return picturesParagraphs
+      })()
+
       return { storyParagraphs, picturesParagraphs }
     }
+  })()
+
+  const introFileContent = await (async () => {
+    if (introFilePathExists && cont) {
+      const { introFileContent } = await parseIntroFile({ introFilePath })
+      return introFileContent
+    }
+    const userPromptIntro = storyParagraphs.join('\n\n')
+    const systemPromptIntro = `Act as story overview generator provided by user.
+  In this overview you should provide characters, their attributes, their design, world.
+  It should be short and concise in one paragraph, around 30–100 words.
+  User will provide the story text.`
+    verbose && log.normal('Generating intro', { introFilePath })
+    const introFileContent: string = await completionByOpenai({
+      userPrompt: userPromptIntro,
+      systemPrompt: systemPromptIntro,
+      model: 'gpt-4o',
+    })
+    return introFileContent
   })()
 
   const storyFileContent = storyParagraphs.join('\n\n')
   const picturesFileContent = picturesParagraphs.join('\n\n')
   await fs.writeFile(storyFilePath, storyFileContent)
   await fs.writeFile(picturesTextFilePath, picturesFileContent)
+  await fs.writeFile(introFilePath, introFileContent)
   if (storyParagraphs.length !== picturesParagraphs.length) {
-    await fs.writeFile(storyFilePath + '.error', storyFileContent + '\n\n ======== \n\n' + picturesFileContent)
     throw new Error('Number of story paragraphs and pictures paragraphs should be equal')
   }
   if (!storyParagraphs.length) {
@@ -320,6 +376,7 @@ export const generateStoryPictures = async ({
   config,
   pictureTemplateFilePath,
   picturesTextFilePath,
+  introFilePath,
   picturesDirPath,
   verbose,
   force,
@@ -328,11 +385,13 @@ export const generateStoryPictures = async ({
   config: Config
   pictureTemplateFilePath: string
   picturesTextFilePath: string
+  introFilePath: string
   picturesDirPath: string
   verbose?: boolean
   force?: boolean
   cont?: boolean
 }) => {
+  introFilePath = path.resolve(config.contentDir, introFilePath)
   picturesTextFilePath = path.resolve(config.contentDir, picturesTextFilePath)
   picturesDirPath = path.resolve(config.contentDir, picturesDirPath)
   pictureTemplateFilePath = path.resolve(config.contentDir, pictureTemplateFilePath)
@@ -343,6 +402,7 @@ export const generateStoryPictures = async ({
   await fs.mkdir(picturesDirPath, { recursive: true })
   const { pictureTemplateFileContent } = await parsePictureTemplateFile({ pictureTemplateFilePath })
   const { picturesParagraphs } = await parsePicturesTextFilePath({ picturesTextFilePath })
+  const { introFileContent } = await parseIntroFile({ introFilePath })
   const picturesFilePaths: string[] = []
   const promises: Array<Promise<any>> = []
   for (const [index, pictureParagraph] of picturesParagraphs.entries()) {
@@ -357,9 +417,11 @@ export const generateStoryPictures = async ({
     }
     picturesFilePaths.push(pictureFilePath)
 
-    const prompt = `${pictureParagraph}.
+    const prompt = `Story overview: ${introFileContent}.
     
-Additional instructions: ${pictureTemplateFileContent}.`
+Additional instructions: ${pictureTemplateFileContent}. No text should be included in the image.
+
+You should generate one illustration for this story described in follow prompt: ${pictureParagraph}`
     promises.push(
       imageByOpenai({
         config,

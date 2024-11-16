@@ -105,7 +105,8 @@ export const ttsMegasimpleWithTimestampsByElevenlabs = async ({
   // Map language codes to ElevenLabs voice IDs
   const voiceMap: { [key: string]: string } = {
     en: 'e5WNhrdI30aXpS2RSGm1',
-    ru: '8PCccElp0PQGRfTFCu0p',
+    // ru: '8PCccElp0PQGRfTFCu0p',
+    ru: 'sRk0zCqhS2Cmv0bzx5wA',
     es: 'Nh2zY9kknu6z4pZy6FhD',
     pt: 'IlrWo5tGgTuxNTHyGhWD',
     it: '13Cuh3NuYvWOVQtLbRN8',
@@ -147,10 +148,11 @@ export const ttsMegasimpleWithTimestampsByElevenlabs = async ({
     const response = await axios.post(url, data, { headers })
 
     // The response data should be a JSON object with 'audio' and 'timestamps'
-    const { audio_base64, normalized_alignment } = response.data
+    // alignment || normalized_alignment
+    const { audio_base64, normalized_alignment: choosen_alignment } = response.data
     console.dir(response.data, { depth: null })
 
-    if (!audio_base64 || !normalized_alignment) {
+    if (!audio_base64 || !choosen_alignment) {
       throw new Error('Invalid response from ElevenLabs API')
     }
 
@@ -159,7 +161,7 @@ export const ttsMegasimpleWithTimestampsByElevenlabs = async ({
     await fs.writeFile(distAudioPath, audioBuffer as never as Uint8Array)
 
     // Save the timestamps data to distDataPath
-    await fs.writeFile(distDataPath, JSON.stringify(normalized_alignment, null, 2))
+    await fs.writeFile(distDataPath, JSON.stringify(choosen_alignment, null, 2))
 
     verbose && log.normal(`Synthesized`, { distAudioPath, distDataPath })
   } catch (error: any) {

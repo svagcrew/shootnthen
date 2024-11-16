@@ -43,13 +43,13 @@ export const completionByOpenai = async <T>({
       return [
         {
           role: 'user' as const,
-          content: `_____SYSTEM_PROMPT_____
-${systemPrompt}
+          content: `_____USER_PROMPT_____
+${userPrompt}
 
 
 
-_____USER_PROMPT_____
-${userPrompt}`,
+_____SYSTEM_PROMPT_____
+${systemPrompt}`,
         },
       ]
     } else {

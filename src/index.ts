@@ -9,7 +9,7 @@ import { getVoicesElevenlabs } from '@/lib/elevenlabs.general.js'
 import { removeVideosAndAudios } from '@/lib/fs.js'
 import {
   applyAssSubtitlesToStoryVideo,
-  generateStoryAndPicturesTexts,
+  generateStoryAndIntroAndPicturesTexts,
   generateStoryAudio,
   generateStoryAudioParts,
   generateStoryDescription,
@@ -1316,6 +1316,8 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         pickIndex,
         storyFilePath,
         picturesTextFilePath,
+        introFilePath,
+        cont,
       } = z
         .object({
           characterFilePath: z.string().optional(),
@@ -1325,6 +1327,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           pickIndex: z.string().optional(),
           storyFilePath: z.string().min(1),
           picturesTextFilePath: z.string().min(1),
+          introFilePath: z.string().min(1),
           cont: z.boolean().optional(),
         })
         .parse({
@@ -1363,8 +1366,18 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['pictures', 'p'],
             coalesce: undefined,
           }),
+          introFilePath: getFlagAsString({
+            flags,
+            keys: ['intro', 'r'],
+            coalesce: undefined,
+          }),
+          cont: getFlagAsBoolean({
+            flags,
+            keys: ['cont'],
+            coalesce: false,
+          }),
         })
-      const result = await generateStoryAndPicturesTexts({
+      const result = await generateStoryAndIntroAndPicturesTexts({
         config,
         characterFilePath,
         worldFilePath,
@@ -1373,6 +1386,8 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         pickIndex: pickIndex ? [parseInt(pickIndex.replaceAll(/\D/g, ''), 10)] : undefined,
         storyFilePath,
         picturesTextFilePath,
+        introFilePath,
+        cont,
         verbose,
         force,
       })
@@ -1382,11 +1397,12 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
     case 'story-pictures':
     case 'sp': {
-      const { picturesTextFilePath, pictureTemplateFilePath, picturesDirPath, cont } = z
+      const { picturesTextFilePath, pictureTemplateFilePath, picturesDirPath, introFilePath, cont } = z
         .object({
           picturesTextFilePath: z.string().min(1),
           pictureTemplateFilePath: z.string().min(1),
           picturesDirPath: z.string().min(1),
+          introFilePath: z.string().min(1),
           cont: z.boolean().optional(),
         })
         .parse({
@@ -1405,6 +1421,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['output', 'o'],
             coalesce: undefined,
           }),
+          introFilePath: getFlagAsString({
+            flags,
+            keys: ['intro', 'r'],
+            coalesce: undefined,
+          }),
           cont: getFlagAsBoolean({
             flags,
             keys: ['cont'],
@@ -1414,6 +1435,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const result = await generateStoryPictures({
         config,
         picturesTextFilePath,
+        introFilePath,
         pictureTemplateFilePath,
         picturesDirPath,
         cont,
@@ -1712,6 +1734,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const generalDir = path.resolve(contentDir, 'general')
 
       const storyFilePath = path.resolve(episodeDir, 'story.txt')
+      const introFilePath = path.resolve(episodeDir, 'intro.txt')
       const picturesTextFilePath = path.resolve(episodeDir, 'pictures.txt')
       const titleFilePath = path.resolve(episodeDir, 'title.txt')
       const descriptionFilePath = path.resolve(episodeDir, 'description.txt')
@@ -1727,6 +1750,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
       const shrt = (fullFilePath: string) => fullFilePath.replace(contentDir + '/', '')
       const storyFilePathShrt = shrt(storyFilePath)
+      const introFilePathShrt = shrt(introFilePath)
       const picturesTextFilePathShrt = shrt(picturesTextFilePath)
       const titleFilePathShrt = shrt(titleFilePath)
       const descriptionFilePathShrt = shrt(descriptionFilePath)
@@ -1760,13 +1784,13 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       let lastCommandIndex = -1
       const commands = [
         pickIndexAsEpisodeNumber
-          ? `snt stp -i ${itemsFilePathShrt} -k episodes/${episodeNumber} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`
+          ? `snt stp -r ${introFilePathShrt} -i ${itemsFilePathShrt} -k episodes/${episodeNumber} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`
           : noItems
-            ? `snt stp -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`
-            : `snt stp -i ${itemsFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`,
+            ? `snt stp -r ${introFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`
+            : `snt stp -r ${introFilePathShrt} -i ${itemsFilePathShrt} -t ${storyTemplateFilePathShrt} -s ${storyFilePathShrt} -p ${picturesTextFilePathShrt} && \\`,
         `snt st -s ${storyFilePathShrt} -o ${titleFilePathShrt} && \\`,
         `snt sd -s ${storyFilePathShrt} -o ${descriptionFilePathShrt} && \\`,
-        `snt sp -p ${picturesTextFilePathShrt} -t ${pictureTemplateFilePathShrt} -o ${picturesDirPathShrt} --cont && \\`,
+        `snt sp -r ${introFilePathShrt} -p ${picturesTextFilePathShrt} -t ${pictureTemplateFilePathShrt} -o ${picturesDirPathShrt} --cont && \\`,
         `snt sap -l ${srcLang} -s ${storyFilePathShrt} -o ${audioPartsDirPathShrt} --cont && \\`,
         `snt saf -d ${audioPartsDirPathShrt} -o ${audioFilePathShrt} && \\`,
         `snt spv -p ${picturesDirPathShrt} -a ${audioPartsDirPathShrt} -o ${videoNoassSilentFilePathShrt} --cont && \\`,
@@ -1781,10 +1805,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         // Step 1
         lastCommandIndex++
         if (pickIndexAsEpisodeNumber) {
-          // snt stp -i general/items.json -k episodes/2 -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt
-          await generateStoryAndPicturesTexts({
+          // snt stp -r episodes/2/intro.txt -i general/items.json -k episodes/2 -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt
+          await generateStoryAndIntroAndPicturesTexts({
             config,
             itemsFilePath,
+            introFilePath,
             pickIndex: [episodeNumber],
             storyTemplateFilePath,
             storyFilePath,
@@ -1793,8 +1818,9 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             force,
           })
         } else if (noItems) {
-          await generateStoryAndPicturesTexts({
+          await generateStoryAndIntroAndPicturesTexts({
             config,
+            introFilePath,
             storyTemplateFilePath,
             storyFilePath,
             picturesTextFilePath,
@@ -1802,9 +1828,10 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             force,
           })
         } else {
-          // snt stp -i general/items.json -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
-          await generateStoryAndPicturesTexts({
+          // snt stp -r episodes/2/intro.txt -i general/items.json -t general/storyTemplate.txt -s episodes/2/story.txt -p episodes/2/pictures.txt && \
+          await generateStoryAndIntroAndPicturesTexts({
             config,
+            introFilePath,
             itemsFilePath,
             storyTemplateFilePath,
             storyFilePath,
@@ -1837,10 +1864,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         })
 
         // Step 4
-        // snt sp -p episodes/2/pictures.txt -t general/pictureTemplate.txt -o episodes/2/pictures --cont
+        // snt sp -r episodes/2/intro.txt -p episodes/2/pictures.txt -t general/pictureTemplate.txt -o episodes/2/pictures --cont
         lastCommandIndex++
         await generateStoryPictures({
           config,
+          introFilePath,
           picturesTextFilePath,
           pictureTemplateFilePath,
           picturesDirPath,
