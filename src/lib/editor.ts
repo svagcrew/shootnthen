@@ -10,7 +10,7 @@ import langCodesLib from 'langs'
 import _ from 'lodash'
 import path from 'path'
 import sharp from 'sharp'
-import { isFileExistsSync, log, spawn } from 'svag-cli-utils'
+import { createDir, isFileExistsSync, log, spawn } from 'svag-cli-utils'
 
 export const extractAudioSimple = async ({
   inputVideoPath,
@@ -351,6 +351,11 @@ export const stretchAudioDuration = async ({
   audioPath: string
   verbose?: boolean
 }) => {
+  verbose &&
+    log.normal(`Stretching audio duration`, {
+      durationMs,
+      audioPath,
+    })
   const srcDurationS = durationMs / 1_000
   const distDurationMs = await getAudioDuration({ audioPath })
   const distDurationS = distDurationMs / 1_000
@@ -1206,5 +1211,91 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   return {
     inputVideoPath,
     outputVideoPath,
+  }
+}
+
+export const extractAudioBackground = async ({
+  inputAudioPath,
+  outputAudioPath,
+  verbose,
+}: {
+  inputAudioPath: string
+  outputAudioPath: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Extracting audio background', { inputAudioPath, outputAudioPath })
+  const parsed = parseFileName(outputAudioPath)
+  const tempDir = path.resolve(parsed.dirname, 'background-temp')
+  await createDir({ cwd: tempDir })
+
+  // const inputAudioDir = path.dirname(inputAudioPath)
+  // const outputAudioDir = path.dirname(outputAudioPath)
+  // if (inputAudioDir !== outputAudioDir) {
+  //   throw new Error('Dirs must be the same')
+  // }
+  // const inputAudioShortPath = path.relative(inputAudioDir, inputAudioPath)
+  // const tempDirShortPath = path.relative(outputAudioDir, tempDir)
+  // verbose && log.normal('Extracting accompaniment', { inputAudioPath, tempDir })
+  // await spawn({
+  //   command: `docker run --platform linux/amd64 -v ${inputAudioDir}:/input_output deezer/spleeter:3.8-5stems separate "/input_output/${inputAudioShortPath}" -p spleeter:2stems -o "/input_output/${tempDirShortPath}"`,
+  //   cwd: process.cwd(),
+  //   verbose,
+  // })
+
+  verbose && log.normal('Extracting accompaniment', { inputAudioPath, tempDir })
+  await spawn({
+    command: `conda run -n py38 spleeter separate "${inputAudioPath}" -p spleeter:2stems -o "${tempDir}"`,
+    cwd: process.cwd(),
+    verbose,
+  })
+
+  const srcBaseName = path.basename(inputAudioPath, path.extname(inputAudioPath))
+  const accompanimentFilePath = path.resolve(tempDir, srcBaseName, 'accompaniment.wav')
+  const { fileExists: accompanimentFileExists } = isFileExistsSync({ filePath: accompanimentFilePath })
+  if (!accompanimentFileExists) {
+    throw new Error('Failed to extract accompaniment')
+  }
+
+  verbose && log.normal('Converting to mp3', { accompanimentFilePath, outputAudioPath })
+  await spawn({
+    command: `ffmpeg -y -i "${accompanimentFilePath}" -vn -ar 44100 -ac 2 -b:a 192k ${outputAudioPath}`,
+    cwd: process.cwd(),
+  })
+
+  verbose && log.normal('Finish extracting audio background', { inputAudioPath, outputAudioPath })
+  return {
+    inputAudioPath,
+    outputAudioPath,
+  }
+}
+
+// Two mp3 audios combine in one same duration audio mp3
+export const combineTwoAudios = async ({
+  audioPath1,
+  audioPath2,
+  outputAudioPath,
+  verbose,
+}: {
+  audioPath1: string
+  audioPath2: string
+  outputAudioPath: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Combining two audios', { audioPath1, audioPath2, outputAudioPath })
+
+  const ffmpegCommand = `ffmpeg -i "${audioPath1}" -i "${audioPath2}" -filter_complex "amix=inputs=2:duration=longest" -y "${outputAudioPath}"`
+
+  verbose && log.normal('Mixing audios using ffmpeg', { ffmpegCommand })
+
+  await spawn({
+    command: ffmpegCommand,
+    cwd: process.cwd(),
+  })
+
+  verbose && log.normal('Finish mixing two audios', { audioPath1, audioPath2, outputAudioPath })
+  return {
+    audioPath1,
+    audioPath2,
+    outputAudioPath,
   }
 }

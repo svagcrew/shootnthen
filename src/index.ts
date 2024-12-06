@@ -3,12 +3,21 @@ import 'source-map-support/register.js'
 import { auphonic } from '@/lib/auphonic.js'
 import { ttsByAzureai } from '@/lib/azureai.js'
 import { getConfig } from '@/lib/config.js'
-import { applyAudiosToVideo, converWavToMp3, cutVideo, decutVideo, extractAudio } from '@/lib/editor.js'
+import {
+  applyAudiosToVideo,
+  combineTwoAudios,
+  converWavToMp3,
+  cutVideo,
+  decutVideo,
+  extractAudio,
+  extractAudioBackground,
+} from '@/lib/editor.js'
 import { elevenlabs } from '@/lib/elevenlabs.dubbing.js'
-import { getVoicesElevenlabs } from '@/lib/elevenlabs.general.js'
+import { getVoicesElevenlabs, ttsByElevenlabs } from '@/lib/elevenlabs.general.js'
 import { removeVideosAndAudios } from '@/lib/fs.js'
 import {
   applyAssSubtitlesToStoryVideo,
+  generateManyThumbnails,
   generateStoryAndIntroAndPicturesTexts,
   generateStoryAudio,
   generateStoryAudioParts,
@@ -35,7 +44,7 @@ import dedent from 'dedent'
 import _ from 'lodash'
 import path from 'path'
 import readlineSync from 'readline-sync'
-import { defineCliApp, getFlagAsBoolean, getFlagAsString, log } from 'svag-cli-utils'
+import { defineCliApp, getFlagAsBoolean, getFlagAsString, log, spawn } from 'svag-cli-utils'
 import z from 'zod'
 
 defineCliApp(async ({ cwd, command, args, argr, flags }) => {
@@ -295,6 +304,32 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const { lang } = z.object({ lang: zLang }).parse({ lang: langRaw })
       const { audioFilePath } = await extractAudio({ config, filePath: args[0], lang, verbose, force })
       log.green(audioFilePath)
+      break
+    }
+    case 'extract-audio-background':
+    case 'eab': {
+      const { inputAudioPath, outputAudioPath } = z
+        .object({ inputAudioPath: z.string().min(1), outputAudioPath: z.string().min(1) })
+        .parse({ inputAudioPath: args[0], outputAudioPath: args[1] })
+      const result = await extractAudioBackground({
+        verbose,
+        inputAudioPath: path.resolve(cwd, inputAudioPath),
+        outputAudioPath: path.resolve(cwd, outputAudioPath),
+      })
+      log.green(result)
+      break
+    }
+    case 'combine-audios':
+    case 'ca': {
+      const { audioPath1, audioPath2, outputAudioPath } = z
+        .object({ audioPath1: z.string().min(1), audioPath2: z.string().min(1), outputAudioPath: z.string().min(1) })
+        .parse({ audioPath1: args[0], audioPath2: args[1], outputAudioPath: args[2] })
+      const result = await combineTwoAudios({
+        audioPath1: path.resolve(cwd, audioPath1),
+        audioPath2: path.resolve(cwd, audioPath2),
+        outputAudioPath: path.resolve(cwd, outputAudioPath),
+      })
+      log.green(result)
       break
     }
     case 'convert-wav-to-mp3':
@@ -774,7 +809,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           title: z.string().optional(),
           description: z.string().optional(),
           playlistId: z.string().optional(),
-          privacyStatus: z.enum(['private', 'public']),
+          privacyStatus: z.enum(['private', 'public', 'unlisted']),
           filePath: z.string(),
         })
         .parse({
@@ -796,7 +831,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           privacyStatus: getFlagAsString({
             flags,
             keys: ['privacy-status', 's'],
-            coalesce: 'private',
+            coalesce: 'public',
           }),
           filePath: args[0],
         })
@@ -923,8 +958,13 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     // }
 
     case 'tts': {
-      const { lang, srtPath, srcAudioPath } = z
-        .object({ lang: zLang.optional(), srtPath: z.string().min(1), srcAudioPath: z.string().min(1) })
+      const { lang, srtPath, srcAudioPath, provider } = z
+        .object({
+          lang: zLang.optional(),
+          srtPath: z.string().min(1),
+          srcAudioPath: z.string().min(1),
+          provider: z.enum(['azureai', 'elevenlabs']),
+        })
         .parse({
           lang: getFlagAsString({
             flags,
@@ -941,16 +981,33 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['src-audio', 'a'],
             coalesce: undefined,
           }),
+          provider: getFlagAsString({
+            flags,
+            keys: ['provider', 'p'],
+            coalesce: 'elevenlabs',
+          }),
         })
-      const { audioFilePath } = await ttsByAzureai({
-        force,
-        config,
-        lang,
-        verbose,
-        srcAudioPath,
-        srtPath,
-      })
-      log.green(audioFilePath)
+      if (provider === 'elevenlabs') {
+        const { audioFilePath } = await ttsByElevenlabs({
+          force,
+          config,
+          lang,
+          verbose,
+          srcAudioPath,
+          srtPath,
+        })
+        log.green(audioFilePath)
+      } else {
+        const { audioFilePath } = await ttsByAzureai({
+          force,
+          config,
+          lang,
+          verbose,
+          srcAudioPath,
+          srtPath,
+        })
+        log.green(audioFilePath)
+      }
       break
     }
 
@@ -1306,6 +1363,135 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       break
     }
 
+    case 'bamb': {
+      const filePathRaw = args[0]
+      const parsedFilePath = parseFileName(filePathRaw)
+      if (parsedFilePath.ext !== 'mp4') {
+        log.red('File is not mp4')
+        break
+      }
+      const srcLangRaw = parsedFilePath.langSingle
+      const srcSrtFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.srt`)
+      const srcAudioFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.mp3`)
+      const srcBackgroundAudioFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.background.mp3`)
+      const { filePath, srcLang, distLangs, skipSrcCommands } = z
+        .object({
+          skipSrcCommands: z.boolean().default(false),
+          filePath: z.string().min(1),
+          distLangs: z.array(zLangProcessed).min(1),
+          srcLang: zLangProcessed,
+        })
+        .parse({
+          skipSrcCommands: getFlagAsBoolean({
+            flags,
+            keys: ['skip-src-commands', 's'],
+            coalesce: false,
+          }),
+          filePath: filePathRaw,
+          distLangs: args[1]?.split(',') || [],
+          srcLang: srcLangRaw,
+        })
+
+      let lastCommandIndex = -1
+      const commands = skipSrcCommands
+        ? []
+        : [
+            // snt ea zxc.ru.mp4 -l ru
+            `snt ea ${parsedFilePath.basename} -l ${srcLang}`,
+            // snt esr zxc.ru.mp3 -l ru
+            `snt esr ${parsedFilePath.name}.${srcLang}.mp3 -l ${srcLang}`,
+            // eab zxc.ru.mp3 zxc.background.mp3
+            `eab ${parsedFilePath.name}.${srcLang}.mp3 ${parsedFilePath.name}.background.mp3`,
+          ]
+      for (const distLang of distLangs) {
+        // snt ts zxc.ru.srt --dl en
+        commands.push(`snt ts ${parsedFilePath.name}.${srcLang}.srt --dl ${distLang}`)
+        // snt tts -s zxc.en.srt -l en -a zxc.ru.mp3
+        commands.push(
+          `snt tts -s ${parsedFilePath.name}.${distLang}.srt -l ${distLang} -a ${parsedFilePath.name}.${srcLang}.mp3`
+        )
+        // mv zxc.en.mp3 zxc.en.speach.mp3
+        commands.push(`mv ${parsedFilePath.name}.${distLang}.mp3 ${parsedFilePath.name}.${distLang}.speach.mp3`)
+        // ca zxc.background.mp3 zxc.en.speach.mp3 zxc.en.mp3
+        commands.push(
+          `ca ${parsedFilePath.name}.background.mp3 ${parsedFilePath.name}.${distLang}.speach.mp3 ${parsedFilePath.name}.${distLang}.mp3`
+        )
+        // snt aa zxc.ru.mp4 -l en
+        commands.push(`snt aa ${parsedFilePath.basename} -l ${distLang}`)
+      }
+      commands.push(`snt aa ${parsedFilePath.basename} -l ${[srcLang, ...distLangs].join(',')}`)
+      log.green('Commands:', ...commands)
+      try {
+        if (!skipSrcCommands) {
+          lastCommandIndex++
+          const { audioFilePath: srcAudioFilePath } = await extractAudio({
+            config,
+            filePath: args[0],
+            lang: srcLang,
+            verbose,
+            force,
+          })
+          lastCommandIndex++
+          const { srtFilePath: srcSrtFilePath } = await extractSrtByRevai({
+            config,
+            lang: srcLang,
+            verbose,
+            filePath: srcAudioFilePath,
+            translatedLangs: [],
+            force,
+          })
+          lastCommandIndex++
+          await extractAudioBackground({
+            inputAudioPath: srcAudioFilePath,
+            outputAudioPath: srcBackgroundAudioFilePath,
+          })
+        }
+        for (const distLang of distLangs) {
+          lastCommandIndex++
+          const { distSrtPath } = await translateSrtByOpenai({
+            config,
+            srcSrtPath: srcSrtFilePath,
+            srcLang,
+            distLang,
+            verbose,
+            force,
+          })
+          lastCommandIndex++
+          const { audioFilePath: dubbedAudioFilePath } = await ttsByAzureai({
+            force,
+            config,
+            lang: distLang,
+            verbose,
+            srcAudioPath: srcAudioFilePath,
+            srtPath: distSrtPath,
+          })
+          lastCommandIndex++
+          await spawn({
+            command: `mv "${dubbedAudioFilePath}" "${parsedFilePath.name}.${distLang}.speach.mp3"`,
+            cwd: parsedFilePath.dirname,
+            verbose,
+          })
+          lastCommandIndex++
+          await combineTwoAudios({
+            audioPath1: srcBackgroundAudioFilePath,
+            audioPath2: `${parsedFilePath.name}.${distLang}.speach.mp3`,
+            outputAudioPath: `${parsedFilePath.name}.${distLang}.mp3`,
+          })
+          lastCommandIndex++
+          await applyAudiosToVideo({ inputVideoPath: filePath, config, langs: [distLang] })
+        }
+        await applyAudiosToVideo({ inputVideoPath: filePath, config, langs: [srcLang, ...distLangs] })
+        log.green('Success')
+      } catch (error: any) {
+        // eslint-disable-next-line no-console
+        console.error(error)
+        log.red('Error on command:', commands[lastCommandIndex])
+        const nextCommads = commands.slice(lastCommandIndex)
+        log.red('You should run commands:', ...nextCommads)
+      }
+      break
+    }
+
     case 'story-text-pictures':
     case 'stp': {
       const {
@@ -1438,6 +1624,43 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         introFilePath,
         pictureTemplateFilePath,
         picturesDirPath,
+        cont,
+        verbose,
+        force,
+      })
+      log.green(result)
+      break
+    }
+
+    case 'story-thumb':
+    case 'sth': {
+      const { storyFilePath, count, cont } = z
+        .object({
+          storyFilePath: z.string().min(1),
+          count: z.string().transform((v) => parseInt(v, 10)),
+          cont: z.boolean().optional(),
+        })
+        .parse({
+          storyFilePath: getFlagAsString({
+            flags,
+            keys: ['story', 's'],
+            coalesce: undefined,
+          }),
+          count: getFlagAsString({
+            flags,
+            keys: ['count', 'c'],
+            coalesce: '3',
+          }),
+          cont: getFlagAsBoolean({
+            flags,
+            keys: ['cont'],
+            coalesce: false,
+          }),
+        })
+      const result = await generateManyThumbnails({
+        config,
+        storyFilePath,
+        count,
         cont,
         verbose,
         force,
@@ -1665,12 +1888,13 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
 
     case 'story-youtube-upload':
     case 'syu': {
-      const { storyTitleFilePath, storyDescriptionFilePath, videoFilePath, playlistId } = z
+      const { storyTitleFilePath, storyDescriptionFilePath, videoFilePath, playlistId, privacyStatus } = z
         .object({
           videoFilePath: z.string().min(1),
           storyTitleFilePath: z.string().min(1),
           storyDescriptionFilePath: z.string().min(1),
           playlistId: z.string().optional(),
+          privacyStatus: z.enum(['private', 'public', 'unlisted']),
         })
         .parse({
           videoFilePath: getFlagAsString({
@@ -1693,6 +1917,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['playlist', 'p'],
             coalesce: undefined,
           }),
+          privacyStatus: getFlagAsString({
+            flags,
+            keys: ['privacy-status'],
+            coalesce: 'public',
+          }),
         })
       const result = await uploadStoryToYoutube({
         config,
@@ -1700,6 +1929,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         storyTitleFilePath,
         videoFilePath,
         playlistId,
+        privacyStatus,
         verbose,
         force,
       })
@@ -1708,10 +1938,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     }
 
     case 'booh': {
-      const { pickIndexAsEpisodeNumber, noItems } = z
+      const { pickIndexAsEpisodeNumber, noItems, privacyStatus } = z
         .object({
           pickIndexAsEpisodeNumber: z.boolean(),
           noItems: z.boolean(),
+          privacyStatus: z.enum(['private', 'public', 'unlisted']),
         })
         .parse({
           pickIndexAsEpisodeNumber: getFlagAsBoolean({
@@ -1723,6 +1954,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             flags,
             keys: ['no-items', 'n'],
             coalesce: false,
+          }),
+          privacyStatus: getFlagAsString({
+            flags,
+            keys: ['privacy-status'],
+            coalesce: 'public',
           }),
         })
       const srcLang = 'en'
@@ -1945,6 +2181,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           storyDescriptionFilePath: descriptionFilePath,
           videoFilePath,
           verbose,
+          privacyStatus,
           force,
         })
 
@@ -1983,6 +2220,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         lkp | list-kinescope-projects
 
         ea | extract-audio <filePath> --lang <lang>
+        eab | extract-audio-background <inputFilePath> <outputFilePath>
         cwm | convert-wav-to-mp3 <inputWavPath> <outputMp3Path>
         aa | apply-audios <inputVideoPath> --langs <langs>
 

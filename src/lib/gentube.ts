@@ -438,6 +438,94 @@ You should generate one illustration for this story described in follow prompt: 
   }
 }
 
+export const generateThumbnail = async ({
+  storyFilePath,
+  thumbnailFilePath,
+  config,
+  verbose,
+  force,
+}: {
+  storyFilePath: string
+  thumbnailFilePath: string
+  config: Config
+  verbose?: boolean
+  force?: boolean
+}) => {
+  storyFilePath = path.resolve(config.contentDir, storyFilePath)
+  thumbnailFilePath = path.resolve(config.contentDir, thumbnailFilePath)
+  const { fileExists: storyFileExists } = await isFileExists({ filePath: storyFilePath })
+  if (!storyFileExists) {
+    throw new Error(`Story file does not exist: ${storyFilePath}`)
+  }
+  const { fileExists: thumbnailFileExists } = await isFileExists({ filePath: thumbnailFilePath })
+  if (thumbnailFileExists && !force) {
+    throw new Error(`Thumbnail file already exists: ${thumbnailFilePath}`)
+  }
+  const { storyFileContent } = await parseStoryFile({ storyFilePath })
+  const systemPrompt = `Act as youtube video thumbnail image prompt generator and generate prompt to generate a thumbnail for the video-story.
+Reply with simple prompt (describe visual and text over image) which can be used to generate a thumbnail with dall-e for the video-story.
+User will provide the video-story text.`
+  const userPrompt = storyFileContent
+  verbose && log.normal('Generating story thumbnail prompt')
+  const thumbnailPrompt: string = await completionByOpenai({
+    userPrompt,
+    systemPrompt,
+  })
+  verbose && log.normal('Generating story thumbnail', { thumbnailPrompt, thumbnailFilePath })
+  await imageByOpenai({
+    config,
+    imageFilePath: thumbnailFilePath,
+    prompt: thumbnailPrompt,
+    verbose,
+  })
+  return { thumbnailFilePath, thumbnailPrompt }
+}
+
+export const generateManyThumbnails = async ({
+  storyFilePath,
+  count,
+  config,
+  cont,
+  verbose,
+  force,
+}: {
+  storyFilePath: string
+  count: number
+  config: Config
+  cont?: boolean
+  verbose?: boolean
+  force?: boolean
+}) => {
+  storyFilePath = path.resolve(config.contentDir, storyFilePath)
+  const thumbnailsDirPath = path.dirname(storyFilePath)
+  const { fileExists: storyFileExists } = await isFileExists({ filePath: storyFilePath })
+  if (!storyFileExists) {
+    throw new Error(`Story file does not exist: ${storyFilePath}`)
+  }
+  const thumbnailsFilesPaths = _.times(count, (index) => {
+    return path.resolve(thumbnailsDirPath, `thumb.${index}.png`)
+  })
+  for (const [index, thumbnailFilePath] of thumbnailsFilesPaths.entries()) {
+    const { fileExists: thumbnailFileExists } = await isFileExists({ filePath: thumbnailFilePath })
+    if (thumbnailFileExists && cont) {
+      verbose && log.normal('Thumbnail already exists, skip', { thumbnailFilePath })
+      continue
+    }
+    if (thumbnailFileExists && !force) {
+      throw new Error(`Thumbnail file already exists: ${thumbnailFilePath}`)
+    }
+    verbose && log.normal('Generating story thumbnail', { index, thumbnailFilePath })
+    await generateThumbnail({
+      storyFilePath,
+      thumbnailFilePath,
+      config,
+      verbose,
+      force,
+    })
+  }
+  return { thumbnailsFilesPaths }
+}
+
 export const generateStoryAudioParts = async ({
   config,
   storyFilePath,
@@ -624,6 +712,7 @@ export const uploadStoryToYoutube = async ({
   storyDescriptionFilePath,
   videoFilePath,
   playlistId,
+  privacyStatus,
   config,
   verbose,
   force,
@@ -632,6 +721,7 @@ export const uploadStoryToYoutube = async ({
   storyDescriptionFilePath: string
   videoFilePath: string
   playlistId?: string
+  privacyStatus: 'private' | 'public' | 'unlisted'
   config: Config
   verbose?: boolean
   force?: boolean
@@ -663,7 +753,7 @@ export const uploadStoryToYoutube = async ({
     filePath: videoFilePath,
     verbose,
     force,
-    privacyStatus: 'public',
+    privacyStatus,
   })
   return result
 }

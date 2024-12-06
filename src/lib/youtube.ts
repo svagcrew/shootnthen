@@ -27,7 +27,7 @@ const uploadFile = async ({
   title?: string
   description?: string
   playlistId?: string
-  privacyStatus?: 'private' | 'public'
+  privacyStatus?: 'private' | 'public' | 'unlisted'
   filePath: string
   force?: boolean
   verbose?: boolean
