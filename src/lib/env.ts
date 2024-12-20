@@ -35,6 +35,7 @@ const zEnv = z.object({
   AZURE_AI_KEY: z.string(),
   AZURE_AI_REGION: z.string(),
   OPENAI_API_KEY: z.string(),
+  VK_ACCESS_TOKEN: z.string(),
 })
 
 type Env = z.infer<typeof zEnv>

@@ -16,6 +16,8 @@ export const zConfig = z.object({
   auphonicPresetId: z.string().optional().nullable(),
   youtubePlaylistId: z.string().optional().nullable(),
   youtubePrivacyStatus: z.enum(['private', 'public']).optional().nullable(),
+  vkGroupId: z.string().optional().nullable(),
+  vkAlbumId: z.string().optional().nullable(),
   srcLang: zLang.optional().nullable(),
   distLangs: z.array(zLangProcessed),
 })
@@ -30,6 +32,8 @@ const defaultConfig: Config = {
   auphonicPresetId: null,
   youtubePlaylistId: null,
   youtubePrivacyStatus: 'private',
+  vkGroupId: null,
+  vkAlbumId: null,
   srcLang: null,
   distLangs: [],
 }

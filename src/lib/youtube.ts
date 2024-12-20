@@ -143,6 +143,70 @@ const addThumbnail = async ({
   verbose && log.normal('Thumbnail uploaded', { thumbnailPath: thumbnailPathAbs })
 }
 
+const updateTexts = async ({
+  config,
+  videoId,
+  title,
+  desc,
+  verbose,
+}: {
+  config: Config
+  videoId: string
+  title?: string
+  desc?: string
+  verbose?: boolean
+}) => {
+  const { youtubeClient } = await getYoutubeClient({ config })
+
+  if (!title && !desc) {
+    throw new Error('No title or desc')
+  }
+
+  // Log before starting the update if verbose mode is enabled
+  verbose && log.normal('Updating desc and title', { videoId, desc, title })
+
+  // Fetch the current video details
+  const videoDetailsResponse = await youtubeClient.videos.list({
+    part: ['snippet'],
+    id: [videoId],
+  })
+
+  // Check if the video exists
+  if (videoDetailsResponse.data.items?.length === 0) {
+    throw new Error(`Video with ID ${videoId} not found.`)
+  }
+
+  // Get the current video snippet (which contains the description)
+  const videoSnippet = videoDetailsResponse.data.items?.[0].snippet
+  if (!videoSnippet) {
+    throw new Error(`Snippet not found for video with ID ${videoId}.`)
+  }
+
+  // Update the title if it was provided
+  if (title) {
+    videoSnippet.title = title
+  }
+
+  // Update the description if it was provided
+  if (desc) {
+    videoSnippet.description = desc
+  }
+
+  // Perform the update request
+  const updateResponse = await youtubeClient.videos.update({
+    part: ['snippet'],
+    requestBody: {
+      id: videoId,
+      snippet: videoSnippet,
+    },
+  })
+
+  // Log the response and confirm the update if verbose mode is enabled
+  verbose && log.normal('Desc and title uploaded', { videoId, desc, title })
+
+  return updateResponse.data
+}
+
 const downloadFile = async ({
   config,
   url,
@@ -180,5 +244,6 @@ const downloadFile = async ({
 export const youtube = {
   uploadFile,
   addThumbnail,
+  updateTexts,
   downloadFile,
 }
