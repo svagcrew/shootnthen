@@ -11,6 +11,7 @@ import {
   decutVideo,
   extractAudio,
   extractAudioBackground,
+  getPictureFromVideo,
 } from '@/lib/editor.js'
 import { elevenlabs } from '@/lib/elevenlabs.dubbing.js'
 import { getVoicesElevenlabs, ttsByElevenlabs } from '@/lib/elevenlabs.general.js'
@@ -57,6 +58,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
   const force = getFlagAsBoolean({
     flags,
     keys: ['force'],
+    coalesce: false,
+  })
+  const cont = getFlagAsBoolean({
+    flags,
+    keys: ['cont'],
     coalesce: false,
   })
   const { config } = await getConfig({
@@ -1489,6 +1495,43 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         const nextCommads = commands.slice(lastCommandIndex)
         log.red('You should run commands:', ...nextCommads)
       }
+      break
+    }
+
+    case 'video-picture':
+    case 'vp': {
+      const { videoPath, picturePath, momentMs } = z
+        .object({
+          momentMs: z.coerce.number().int(),
+          videoPath: z.string().min(1),
+          picturePath: z.string().min(1),
+        })
+        .parse({
+          momentMs: getFlagAsString({
+            flags,
+            keys: ['moment', 'm'],
+            coalesce: undefined,
+          }),
+          videoPath: getFlagAsString({
+            flags,
+            keys: ['video', 'v'],
+            coalesce: undefined,
+          }),
+          picturePath: getFlagAsString({
+            flags,
+            keys: ['picture', 'p'],
+            coalesce: undefined,
+          }),
+        })
+      const result = await getPictureFromVideo({
+        momentMs,
+        videoPath,
+        picturePath,
+        cont,
+        verbose,
+        force,
+      })
+      log.green(result)
       break
     }
 

@@ -19,6 +19,8 @@ const uploadFile = async ({
   description = '',
   playlistId,
   privacyStatus,
+  publishAt,
+  thumbnailPath,
   filePath,
   force,
   verbose,
@@ -28,6 +30,8 @@ const uploadFile = async ({
   description?: string
   playlistId?: string
   privacyStatus?: 'private' | 'public' | 'unlisted'
+  publishAt?: Date
+  thumbnailPath?: string
   filePath: string
   force?: boolean
   verbose?: boolean
@@ -41,11 +45,14 @@ const uploadFile = async ({
   const exRecord = meta.youtube.videos.find((v) => v.filePath === filePathAbs)
   if (exRecord && !force) {
     verbose && log.normal('File already uploaded', { filePath })
-    return { filePath: filePathAbs }
+    return { filePath: filePathAbs, id: exRecord.id, editUrl: exRecord.editUrl, skip: true }
   }
   title = title || meta.title
   if (!title) {
     throw new Error('No title')
+  }
+  if (publishAt && privacyStatus !== 'private') {
+    throw new Error('publishAt can only be used with privacyStatus=private')
   }
   const res = await youtubeClient.videos.insert({
     part: ['snippet', 'status'],
@@ -58,6 +65,7 @@ const uploadFile = async ({
         privacyStatus,
         madeForKids: false,
         selfDeclaredMadeForKids: false,
+        ...(privacyStatus === 'private' && !!publishAt && { publishAt: publishAt.toISOString() }),
       },
     },
     media: {
@@ -68,6 +76,18 @@ const uploadFile = async ({
   const id = res.data.id
   if (!id) {
     throw new Error('No id after upload')
+  }
+
+  if (thumbnailPath) {
+    const thumbnailPathAbs = path.resolve(config.contentDir, thumbnailPath)
+    verbose && log.normal('Uploading thumbnail', { thumbnailPath: thumbnailPathAbs })
+    await youtubeClient.thumbnails.set({
+      videoId: id,
+      media: {
+        body: fsync.createReadStream(thumbnailPathAbs),
+      },
+    })
+    verbose && log.normal('Thumbnail uploaded', { thumbnailPath: thumbnailPathAbs })
   }
 
   if (playlistId) {
@@ -95,7 +115,32 @@ const uploadFile = async ({
   return {
     filePath: filePathAbs,
     editUrl,
+    id,
+    skip: false,
   }
+}
+
+const addThumbnail = async ({
+  config,
+  videoId,
+  thumbnailPath,
+  verbose,
+}: {
+  config: Config
+  videoId: string
+  thumbnailPath: string
+  verbose?: boolean
+}) => {
+  const { youtubeClient } = await getYoutubeClient({ config })
+  const thumbnailPathAbs = path.resolve(config.contentDir, thumbnailPath)
+  verbose && log.normal('Uploading thumbnail', { thumbnailPath: thumbnailPathAbs })
+  await youtubeClient.thumbnails.set({
+    videoId,
+    media: {
+      body: fsync.createReadStream(thumbnailPathAbs),
+    },
+  })
+  verbose && log.normal('Thumbnail uploaded', { thumbnailPath: thumbnailPathAbs })
 }
 
 const downloadFile = async ({
@@ -134,5 +179,6 @@ const downloadFile = async ({
 
 export const youtube = {
   uploadFile,
+  addThumbnail,
   downloadFile,
 }

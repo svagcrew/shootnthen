@@ -1299,3 +1299,36 @@ export const combineTwoAudios = async ({
     outputAudioPath,
   }
 }
+
+// add silen
+export const getPictureFromVideo = async ({
+  momentMs,
+  videoPath,
+  picturePath,
+  cont,
+  force,
+  verbose,
+}: {
+  momentMs: number
+  videoPath: string
+  picturePath: string
+  cont?: boolean
+  force?: boolean
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Getting picture from video', { momentMs, videoPath, picturePath })
+  const { fileExists: pictureFileExists } = isFileExistsSync({ filePath: picturePath })
+  if (pictureFileExists) {
+    if (cont) {
+      verbose && log.normal('Picture file already exists', { momentMs, videoPath, picturePath })
+      return { momentMs, videoPath, picturePath, skipped: true }
+    }
+    if (!force) {
+      throw new Error('Picture file already exists')
+    }
+  }
+  const ffmpegCommand = `ffmpeg -ss ${momentMs / 1_000} -i "${videoPath}" -frames:v 1 -y "${picturePath}"`
+  await spawn({ command: ffmpegCommand, cwd: process.cwd(), verbose })
+  verbose && log.normal('Got picture from video', { momentMs, videoPath, picturePath })
+  return { momentMs, videoPath, picturePath, skipped: false }
+}

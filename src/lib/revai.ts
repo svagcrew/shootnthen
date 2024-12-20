@@ -80,31 +80,67 @@ export const extractSrtSimpleByRevai = async ({
   lang: string
   translatedLangs: Lang[]
   verbose?: boolean
-}) => {
+}): Promise<void> => {
   const accessToken = getEnv('REVAI_ACCESS_TOKEN')
   if (!accessToken) {
     throw new Error('REVAI_ACCESS_TOKEN not found')
   }
   const client = new RevAiApiClient(accessToken)
   verbose && log.normal('Submitting job', { inputAudioPath, lang, translatedLangs })
-  const job = await client.submitJobLocalFile(inputAudioPath, {
-    language: lang,
-    ...(translatedLangs?.length
-      ? {
-          translation_config: {
-            target_languages: translatedLangs.map((translatedLang) => ({
-              language: translatedLang,
-              model: TranslationModel.PREMIUM,
-            })),
-          },
-        }
-      : {}),
-  })
+  const job = await (async () => {
+    try {
+      return await client.submitJobLocalFile(inputAudioPath, {
+        language: lang,
+        ...(translatedLangs?.length
+          ? {
+              translation_config: {
+                target_languages: translatedLangs.map((translatedLang) => ({
+                  language: translatedLang,
+                  model: TranslationModel.PREMIUM,
+                })),
+              },
+            }
+          : {}),
+      })
+    } catch (error: any) {
+      if (error.message.includes('ECONNRESET')) {
+        verbose && log.normal('ECONNRESET while submitting job')
+        return null
+      } else {
+        throw error
+      }
+    }
+  })()
+
+  if (!job) {
+    await extractSrtSimpleByRevai({
+      // config,
+      inputAudioPath,
+      outputSrtPath,
+      outputJsonPath,
+      outputTxtPath,
+      lang,
+      translatedLangs,
+      verbose,
+    })
+    return
+  }
 
   while (true) {
     verbose && log.normal('Waiting for job', { jobId: job.id })
     await wait(5)
-    const jobDetails = await client.getJobDetails(job.id)
+    const jobDetails = await (async () => {
+      try {
+        return await client.getJobDetails(job.id)
+      } catch (error: any) {
+        if (error.message.includes('ECONNRESET')) {
+          verbose && log.normal('ECONNRESET while waiting for job', { jobId: job.id })
+          return { status: 'in_progress' }
+        } else {
+          throw error
+        }
+      }
+    })()
     if (jobDetails.status === 'in_progress') {
       continue
     }

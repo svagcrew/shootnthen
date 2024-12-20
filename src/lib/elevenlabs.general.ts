@@ -100,7 +100,7 @@ export const ttsByElevenlabs = async ({
   return { audioFilePath: distAudioPath }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 const promiseAllSeq = async <T>(promises: Array<() => Promise<T>>): Promise<T[]> => {
   const results = []
   for (const promise of promises) {
