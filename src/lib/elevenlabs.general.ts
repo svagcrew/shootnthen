@@ -316,7 +316,6 @@ export const ttsMegasimpleByElevenlabs = async ({
       verbose && log.normal(`Synthesized audio saved to ${distAudioPath}`)
       return
     } catch (error: any) {
-      console.log(123, error.response.data)
       const isDataBuffer = error.response?.data instanceof Buffer
       const textFrmBuffer = (() => {
         if (isDataBuffer) {
