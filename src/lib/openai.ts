@@ -241,6 +241,7 @@ export const imageByOpenai = async ({
 }
 
 const translateFewStringByOpenai = async ({
+  note,
   verbose,
   srcLang,
   distLang,
@@ -248,6 +249,7 @@ const translateFewStringByOpenai = async ({
   translatedStrings = [],
   notTranslatedStrings,
 }: {
+  note?: string
   verbose?: boolean
   srcLang: string
   distLang: string
@@ -286,7 +288,7 @@ Short strings should be translated to short strings, long strings to long string
 because the length of the translated strings should be similar to the original ones.
 STRONGLY Keep the original count of strings: ${notTranslatedStrings.length}.
 REPLY with only the translated subtitles, WITHOUT additional information, comments, etc.
-User will provide you with array of original strings and you should reply with array of translated strings.`
+User will provide you with array of original strings and you should reply with array of translated strings.${!note ? '' : `Also notice: ${note}`}`
       //       const systemPromptEnd = !translatedStrings ? null : `Take a notice that previously was translated some previous strings and you should continue from there:
       // ${translatedStrings.map(({ src, dist }) => `${src} -> ${dist}`).join('\n')}`
       const systemPromptEnd = null
@@ -336,6 +338,7 @@ User will provide you with array of original strings and you should reply with a
 
 export const translateSrtByOpenai = async ({
   config,
+  note,
   srcSrtPath,
   distSrtPath,
   srcLang,
@@ -344,6 +347,7 @@ export const translateSrtByOpenai = async ({
   force,
 }: {
   config: Config
+  note?: string
   srcSrtPath: string
   distSrtPath?: string
   srcLang?: string
@@ -383,6 +387,7 @@ export const translateSrtByOpenai = async ({
     verbose &&
       log.normal('Translating chunk', { chunkSize, chunkNumber: i + 1, totalChunksCount: srcSubtitlesChunks.length })
     const translatedChunk = await translateFewStringByOpenai({
+      note,
       verbose,
       srcLang,
       distLang,

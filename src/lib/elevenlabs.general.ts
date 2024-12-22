@@ -5,6 +5,7 @@ import {
   concatAudios,
   createSilentAudio,
   getAudioDuration,
+  normalizeAudioDuration,
   stretchAudioDuration,
   syncAudiosDuration,
 } from '@/lib/editor.js'
@@ -20,14 +21,22 @@ import SrtParser from 'srt-parser-2'
 import { isFileExistsSync, log } from 'svag-cli-utils'
 
 const executeTtsTask = async ({
+  policy = 'normalize',
   ttsTask,
   outputAudioPath,
   verbose,
 }: {
+  policy?: 'stretch' | 'normalize'
   ttsTask: TtsTask
   outputAudioPath: string
   verbose?: boolean
 }) => {
+  const outputAudioExists = isFileExistsSync({ filePath: outputAudioPath }).fileExists
+  if (outputAudioExists) {
+    verbose && log.normal('Audio file already exists', { outputAudioPath })
+    return ttsTask
+  }
+
   if (ttsTask.type === 'gap') {
     verbose && log.normal(`Creating silent audio for gap (duration: ${ttsTask.durationMs}ms)`)
     await createSilentAudio({
@@ -43,13 +52,22 @@ const executeTtsTask = async ({
     text: ttsTask.text,
     distAudioPath: outputAudioPath,
     lang: ttsTask.lang,
+    voiceId: ttsTask.voiceName,
     verbose,
   })
-  await stretchAudioDuration({
-    audioPath: outputAudioPath,
-    durationMs: ttsTask.durationMs,
-    verbose,
-  })
+  if (policy === 'normalize') {
+    await normalizeAudioDuration({
+      audioPath: outputAudioPath,
+      durationMs: ttsTask.durationMs,
+      verbose,
+    })
+  } else {
+    await stretchAudioDuration({
+      audioPath: outputAudioPath,
+      durationMs: ttsTask.durationMs,
+      verbose,
+    })
+  }
   return ttsTask
 }
 
@@ -58,6 +76,9 @@ export const ttsByElevenlabs = async ({
   srtPath,
   srcAudioPath,
   lang,
+  voiceKey,
+  separateSentences,
+  policy,
   force,
   verbose,
 }: {
@@ -65,6 +86,9 @@ export const ttsByElevenlabs = async ({
   srtPath: string
   srcAudioPath: string
   lang?: string
+  voiceKey?: string
+  separateSentences?: boolean
+  policy?: 'stretch' | 'normalize'
   force?: boolean
   verbose?: boolean
 }) => {
@@ -94,13 +118,15 @@ export const ttsByElevenlabs = async ({
     distAudioPath,
     srcAudioPath,
     lang,
+    voiceKey,
     verbose,
+    policy,
+    separateSentences,
   })
   verbose && log.normal('Ttsed', { audioFilePath: distAudioPath })
   return { audioFilePath: distAudioPath }
 }
 
- 
 const promiseAllSeq = async <T>(promises: Array<() => Promise<T>>): Promise<T[]> => {
   const results = []
   for (const promise of promises) {
@@ -115,6 +141,9 @@ export const ttsSimpleByElevenlabs = async ({
   distAudioPath,
   srcAudioPath,
   lang,
+  voiceKey,
+  policy,
+  separateSentences,
   verbose,
 }: {
   // config: Config,
@@ -122,6 +151,9 @@ export const ttsSimpleByElevenlabs = async ({
   distAudioPath: string
   srcAudioPath: string
   lang: string
+  voiceKey?: string
+  policy?: 'stretch' | 'normalize'
+  separateSentences?: boolean
   verbose?: boolean
 }) => {
   const desiredTotalDurationMs = await getAudioDuration({ audioPath: srcAudioPath })
@@ -129,6 +161,8 @@ export const ttsSimpleByElevenlabs = async ({
   // Map language codes to voice names
   const voiceMap: { [key: string]: string } = {
     en: 'e5WNhrdI30aXpS2RSGm1',
+    'en-luis': 'WGINef1wh4Hi6O62bfO8',
+    'en-oswald': 'u9krpw4IqW8A8YKLvhYX',
     ru: '8PCccElp0PQGRfTFCu0p',
     es: 'Nh2zY9kknu6z4pZy6FhD',
     pt: 'IlrWo5tGgTuxNTHyGhWD',
@@ -145,7 +179,10 @@ export const ttsSimpleByElevenlabs = async ({
   //   de: 'de-DE-KatjaNeural',
   //   tr: 'tr-TR-EmelNeural',
   // }
-  const voiceName = voiceMap[lang] || 'en-US-AriaNeural' // default voice if language not found
+  const voiceName = voiceKey ? voiceMap[`${lang}-${voiceKey}`] : voiceMap[lang]
+  if (!voiceName) {
+    throw new Error(`Voice name not found for language ${lang} ${voiceKey}`)
+  }
 
   // Read and parse the SRT file
   const srtContent = await fs.readFile(srtPath, 'utf8')
@@ -157,14 +194,17 @@ export const ttsSimpleByElevenlabs = async ({
     subtitles,
     voiceName,
     lang,
-    separateSentences: true,
+    separateSentences,
   })
 
   verbose && log.normal(`Generated ${ttsTasks.length} tts tasks`)
 
   const promises = ttsTasks.map((ttsTask, i) => async () => {
     const outputAudioPath = addSuffixToFilePath({ filePath: distAudioPath, suffix: `temp-${i}` })
-    await executeTtsTask({ ttsTask, outputAudioPath, verbose })
+    const outputAudioExists = isFileExistsSync({ filePath: outputAudioPath }).fileExists
+    if (!outputAudioExists) {
+      await executeTtsTask({ ttsTask, outputAudioPath, verbose, policy })
+    }
     return outputAudioPath
   })
   // const ttsTempResultsPaths = await Promise.all(promises.map(async (promise) => await promise()))
@@ -204,11 +244,15 @@ export const ttsMegasimpleByElevenlabs = async ({
   text,
   distAudioPath,
   lang,
+  voiceKey,
+  voiceId,
   verbose,
 }: {
   text: string
   distAudioPath: string
   lang: string
+  voiceKey?: string
+  voiceId?: string
   verbose?: boolean
 }) => {
   verbose &&
@@ -221,6 +265,8 @@ export const ttsMegasimpleByElevenlabs = async ({
   // Map language codes to ElevenLabs voice IDs
   const voiceMap: { [key: string]: string } = {
     en: 'e5WNhrdI30aXpS2RSGm1',
+    'en-luis': 'WGINef1wh4Hi6O62bfO8',
+    'en-oswald': 'u9krpw4IqW8A8YKLvhYX',
     ru: '8PCccElp0PQGRfTFCu0p',
     es: 'Nh2zY9kknu6z4pZy6FhD',
     pt: 'IlrWo5tGgTuxNTHyGhWD',
@@ -229,9 +275,9 @@ export const ttsMegasimpleByElevenlabs = async ({
     tr: 'YXfTfjS5baixEmJfseKO',
   }
 
-  const voiceId = voiceMap[lang]
+  voiceId = voiceId || (voiceKey ? voiceMap[`${lang}-${voiceKey}`] : voiceMap[lang])
   if (!voiceId) {
-    throw new Error(`Voice ID not found for language ${lang}`)
+    throw new Error(`Voice ID not found for language ${lang} ${voiceKey}`)
   }
 
   // ElevenLabs API key
@@ -258,16 +304,35 @@ export const ttsMegasimpleByElevenlabs = async ({
   }
 
   // Make the API request
-  try {
-    const response = await axios.post(url, data, {
-      headers,
-      responseType: 'arraybuffer',
-    })
-    // Save the audio data to the file
-    await fs.writeFile(distAudioPath, response.data)
-    verbose && log.normal(`Synthesized audio saved to ${distAudioPath}`)
-  } catch (error) {
-    throw new Error(`Error synthesizing speech: ${error}`)
+  let retryIndex = 0
+  while (true) {
+    try {
+      const response = await axios.post(url, data, {
+        headers,
+        responseType: 'arraybuffer',
+      })
+      // Save the audio data to the file
+      await fs.writeFile(distAudioPath, response.data)
+      verbose && log.normal(`Synthesized audio saved to ${distAudioPath}`)
+      return
+    } catch (error: any) {
+      console.log(123, error.response.data)
+      const isDataBuffer = error.response?.data instanceof Buffer
+      const textFrmBuffer = (() => {
+        if (isDataBuffer) {
+          return Buffer.from(error.response.data).toString()
+        }
+        return ''
+      })()
+      const errorMessage = textFrmBuffer || (error.response?.data ? JSON.stringify(error.response.data) : error.message)
+      if (retryIndex < 10) {
+        retryIndex++
+        log.normal(`Error synthesizing speech, retrying ${retryIndex}... ${errorMessage}`)
+        await new Promise((resolve) => setTimeout(resolve, 5_000))
+      } else {
+        throw new Error(`Error synthesizing speech: ${errorMessage}`)
+      }
+    }
   }
 }
 
