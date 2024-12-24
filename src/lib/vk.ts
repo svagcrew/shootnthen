@@ -1,5 +1,6 @@
-/* eslint-disable no-console */
 /* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable no-console */
+
 import type { Config } from '@/lib/config.js'
 import { getEnv } from '@/lib/env.js'
 import { getMetaByFilePath, updateMeta } from '@/lib/meta.js'
@@ -33,6 +34,7 @@ const uploadFile = async ({
   verbose?: boolean
 }) => {
   verbose && log.normal('Uploading file to VK', { filePath })
+
   const filePathAbs = path.resolve(config.contentDir, filePath)
   const { meta, metaFilePath } = getMetaByFilePath({ filePath: filePathAbs, config })
   const exRecord = meta.vk.videos.find((v) => v.filePath === filePathAbs)
@@ -46,16 +48,25 @@ const uploadFile = async ({
   }
 
   // Step 1: Get upload URL
-  const uploadUrlResponse = await axios.get('https://api.vk.com/method/video.save', {
-    params: {
-      access_token: getEnv('VK_ACCESS_TOKEN'),
-      v: '5.199',
-      name: title,
-      description,
-      ...(groupId ? { group_id: groupId } : {}),
-      ...(albumId ? { album_id: albumId } : {}),
-      wallpost: 1,
-      is_private: privacyStatus === 'private' ? 1 : 0,
+  const data = {
+    access_token: getEnv('VK_ACCESS_TOKEN'),
+    v: '5.199',
+    name: title,
+    description,
+    ...(groupId ? { group_id: Math.abs(+groupId).toString() } : {}),
+    ...(albumId ? { album_id: Math.abs(+albumId).toString() } : {}),
+    // ...(groupId ? { group_id: groupId } : {}),
+    // ...(albumId ? { album_id: albumId } : {}),
+    wallpost: 0,
+    is_private: privacyStatus === 'private' ? 1 : 0,
+  }
+  const formData0 = new FormData()
+  for (const [key, value] of Object.entries(data)) {
+    formData0.append(key, value)
+  }
+  const uploadUrlResponse = await axios.post('https://api.vk.com/method/video.save', formData0, {
+    headers: {
+      ...formData0.getHeaders(),
     },
   })
   if (uploadUrlResponse.data.error) {
@@ -111,22 +122,30 @@ const addThumbnail = async ({
   const thumbnailPathAbs = path.resolve(config.contentDir, thumbnailPath)
   verbose && log.normal('Uploading thumbnail', { thumbnailPath: thumbnailPathAbs })
 
+  if (!config.vkGroupId) {
+    throw new Error('No VK group ID')
+  }
+
+  const videoIdParts = videoId.split('_')
+  const validVideoId = videoIdParts[1] || videoIdParts[0]
   const uploadUrlResponse = await axios.get('https://api.vk.com/method/video.getThumbUploadUrl', {
     params: {
       access_token: getEnv('VK_ACCESS_TOKEN'),
       v: '5.199',
-      video_id: videoId,
+      video_id: validVideoId,
+      owner_id: config.vkGroupId,
     },
   })
   console.dir(uploadUrlResponse.data, { depth: null })
-  if (uploadUrlResponse.data.error) {
-    throw new Error(`Error getting upload URL: ${uploadUrlResponse.data.error.error_msg}`)
+  const uploadUrlResponseError = uploadUrlResponse.data.error_msg || uploadUrlResponse.data.error?.error_msg
+  if (uploadUrlResponseError) {
+    throw new Error(`Error uploading thumbnail: ${uploadUrlResponseError}`)
   }
 
   const uploadUrl = uploadUrlResponse.data.response.upload_url
 
   const formData = new FormData()
-  formData.append('thumb', fsync.createReadStream(thumbnailPathAbs))
+  formData.append('file', fsync.createReadStream(thumbnailPathAbs))
 
   const thumbnailResponse = await axios.post(uploadUrl, formData, {
     headers: {
@@ -134,9 +153,27 @@ const addThumbnail = async ({
     },
   })
   console.dir(thumbnailResponse.data, { depth: null })
+  const thumbnailResponseError = thumbnailResponse.data.error_msg || thumbnailResponse.data.error?.error_msg
+  if (thumbnailResponseError) {
+    throw new Error(`Error uploading thumbnail: ${thumbnailResponseError}`)
+  }
 
-  if (thumbnailResponse.data.error) {
-    throw new Error(`Error uploading thumbnail: ${thumbnailResponse.data.error.error_msg}`)
+  const formData1 = new FormData()
+  formData1.append('access_token', getEnv('VK_ACCESS_TOKEN'))
+  formData1.append('owner_id', config.vkGroupId)
+  formData1.append('thumb_json', JSON.stringify(thumbnailResponse.data))
+  formData1.append('video_id', validVideoId)
+  formData1.append('set_thumb', 1)
+  formData1.append('v', '5.199')
+  const thumbnailSaveResponse = await axios.post('https://api.vk.com/method/video.saveUploadedThumb', formData1, {
+    headers: {
+      ...formData1.getHeaders(),
+    },
+  })
+  console.dir(thumbnailSaveResponse.data, { depth: null })
+  const thumbnailSaveResponseError = thumbnailSaveResponse.data.error_msg || thumbnailSaveResponse.data.error?.error_msg
+  if (thumbnailSaveResponseError) {
+    throw new Error(`Error uploading thumbnail: ${thumbnailSaveResponseError}`)
   }
 
   verbose && log.normal('Thumbnail uploaded', { thumbnailPath: thumbnailPathAbs })
@@ -159,19 +196,45 @@ const updateTexts = async ({
     throw new Error('No title or desc')
   }
 
+  if (!config.vkGroupId) {
+    throw new Error('No VK group ID')
+  }
+
   // Log before starting the update if verbose mode is enabled
   verbose && log.normal('Updating desc and title', { videoId, desc, title })
 
+  const videoIdParts = videoId.split('_')
+  const validVideoId = videoIdParts[1] || videoIdParts[0]
   // Fetch the current video details
-  const videoDetailsResponse = await axios.get('https://api.vk.com/method/video.edit', {
-    params: {
-      access_token: getEnv('VK_ACCESS_TOKEN'),
-      v: '5.199',
-      video_id: videoId,
-      name: title,
-      description: desc,
-    },
-  })
+  const data = {
+    access_token: getEnv('VK_ACCESS_TOKEN'),
+    v: '5.199',
+    video_id: validVideoId,
+    name: title,
+    desc,
+    owner_id: config.vkGroupId,
+  }
+  const formData = new FormData()
+  for (const [key, value] of Object.entries(data)) {
+    formData.append(key, value)
+  }
+  const videoDetailsResponse = await (async () => {
+    try {
+      return await axios.post('https://api.vk.com/method/video.edit', formData, {
+        headers: {
+          ...formData.getHeaders(),
+        },
+      })
+    } catch (error: any) {
+      const errorData = error.response?.data
+      if (errorData?.error) {
+        throw new Error(`Error updating video: ${errorData.error.error_msg}`)
+      } else {
+        console.error(errorData)
+        throw error
+      }
+    }
+  })()
 
   if (videoDetailsResponse.data.error) {
     throw new Error(`Error updating video: ${videoDetailsResponse.data.error.error_msg}`)
@@ -182,8 +245,135 @@ const updateTexts = async ({
   return videoDetailsResponse.data.response
 }
 
+const changeOrder = async ({
+  config,
+  videoId,
+  prevVideoId,
+  albumId,
+  groupId,
+  verbose,
+}: {
+  config: Config
+  videoId: string
+  prevVideoId: string
+  albumId: string
+  groupId: string
+  verbose?: boolean
+}) => {
+  // Log before starting the update if verbose mode is enabled
+  verbose && log.normal('Updating video order', { videoId, prevVideoId })
+
+  const videoIdParts = videoId.split('_')
+  const validVideoId = videoIdParts[1] || videoIdParts[0]
+  const prevVideoIdParts = prevVideoId.split('_')
+  const validPrevVideoId = prevVideoIdParts[1] || prevVideoIdParts[0]
+  // Fetch the current video details
+  const data = {
+    access_token: getEnv('VK_ACCESS_TOKEN'),
+    v: '5.199',
+    album_id: albumId,
+    video_id: validVideoId,
+    target_id: groupId,
+    owner_id: groupId,
+    after_video_id: validPrevVideoId,
+    after_owner_id: groupId,
+  }
+  console.log(data)
+  const formData = new FormData()
+  for (const [key, value] of Object.entries(data)) {
+    formData.append(key, value)
+  }
+  const reorderResponse = await (async () => {
+    try {
+      return await axios.post('https://api.vk.com/method/video.reorderVideos', formData, {
+        headers: {
+          ...formData.getHeaders(),
+        },
+      })
+    } catch (error: any) {
+      const errorData = error.response?.data
+      if (errorData?.error) {
+        throw new Error(`Error updating video: ${errorData.error.error_msg}`)
+      } else {
+        console.error(errorData)
+        throw error
+      }
+    }
+  })()
+
+  if (reorderResponse.data.error) {
+    throw new Error(`Error updating video: ${reorderResponse.data.error.error_msg}`)
+  }
+
+  verbose && log.normal('Video order updated', { videoId, prevVideoId })
+
+  return reorderResponse.data.response
+}
+
+const post = async ({
+  config,
+  videoId,
+  groupId,
+  message,
+  verbose,
+}: {
+  config: Config
+  videoId: string
+  groupId: string
+  message: string
+  verbose?: boolean
+}) => {
+  // Log before starting the update if verbose mode is enabled
+  verbose && log.normal('Posting video', { videoId, message })
+
+  const videoIdParts = videoId.split('_')
+  const validVideoId = videoIdParts[1] || videoIdParts[0]
+  // Fetch the current video details
+  const data = {
+    access_token: getEnv('VK_ACCESS_TOKEN'),
+    v: '5.199',
+    video_id: validVideoId,
+    owner_id: groupId,
+    message,
+    from_group: 1,
+    attachments: `video${groupId}_${validVideoId}`,
+  }
+  console.log(data)
+  const formData = new FormData()
+  for (const [key, value] of Object.entries(data)) {
+    formData.append(key, value)
+  }
+  const postReponse = await (async () => {
+    try {
+      return await axios.post('https://api.vk.com/method/wall.post', formData, {
+        headers: {
+          ...formData.getHeaders(),
+        },
+      })
+    } catch (error: any) {
+      const errorData = error.response?.data
+      if (errorData?.error) {
+        throw new Error(`Error posting video: ${errorData.error.error_msg}`)
+      } else {
+        console.error(errorData)
+        throw error
+      }
+    }
+  })()
+
+  if (postReponse.data.error) {
+    throw new Error(`Error posting video: ${postReponse.data.error.error_msg}`)
+  }
+
+  verbose && log.normal('Video posted', { videoId, message })
+
+  return postReponse.data.response
+}
+
 export const vk = {
+  post,
   uploadFile,
   addThumbnail,
   updateTexts,
+  changeOrder,
 }
