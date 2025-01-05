@@ -291,12 +291,13 @@ When you counting requested words count or requested paragraphs count, do not co
         }
 
         const userPromptStory = userPromptParts.join('\n\n\n')
-        const systemPromptStory = `Act as a professional storyteller and craft a dynamic story based on the provided information.
-  Expand each section of the story template into multiple short paragraphs.
-  Do not include any titles, scene headings, or extra metadata—only the story text.
-  Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line.
-  This will allow for frequent image changes in the video.
-  Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.`
+        const systemPromptStory = undefined
+        // const systemPromptStory = `Act as a professional storyteller and craft a dynamic story based on the provided information.
+        // Expand each section of the story template into multiple short paragraphs.
+        // Do not include any titles, scene headings, or extra metadata—only the story text.
+        // Each paragraph should represent a single moment or idea, be concise (around 30–50 words), and be separated by an empty line.
+        // This will allow for frequent image changes in the video.
+        // Use vivid and engaging language to captivate the audience, ensuring smooth transitions between paragraphs while maintaining a brisk narrative pace.`
         verbose && log.normal('Generating story', { storyFilePath }, systemPromptStory, userPromptStory)
         const resultStory: string = await completionByOpenai({
           userPrompt: userPromptStory,

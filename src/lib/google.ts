@@ -13,7 +13,7 @@ export const getGoogleAuthClient = async ({
   authClient: any
 }> => {
   const SCOPES = config.googleScopes || [
-    'https://www.googleapis.com/auth/drive',
+    // 'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/youtube',
   ]
 
