@@ -316,12 +316,14 @@ const post = async ({
   groupId,
   message,
   verbose,
+  publishDate,
 }: {
   config: Config
   videoId: string
   groupId: string
   message: string
   verbose?: boolean
+  publishDate?: Date
 }) => {
   // Log before starting the update if verbose mode is enabled
   verbose && log.normal('Posting video', { videoId, message })
@@ -337,6 +339,12 @@ const post = async ({
     message,
     from_group: 1,
     attachments: `video${groupId}_${validVideoId}`,
+    ...(publishDate
+      ? {
+          // unix timestamp
+          publish_date: Math.floor(publishDate.getTime() / 1_000),
+        }
+      : {}),
   }
   console.log(data)
   const formData = new FormData()
