@@ -186,6 +186,61 @@ export const cutVideo = async ({
   }
 }
 
+export const cutAudio = async ({
+  inputAudioPath,
+  outputAudioPath,
+  start,
+  end,
+  cwd,
+}: {
+  inputAudioPath: string
+  outputAudioPath: string
+  start: string
+  end: string
+  cwd: string
+}) => {
+  const normalizedInputAudioPath = path.resolve(cwd, inputAudioPath)
+  const normalizedOutputAudioPath = path.resolve(cwd, outputAudioPath)
+  const nativeCommand = `ffmpeg -i "${normalizedInputAudioPath}" -ss ${start} -to ${end} -c copy -y "${normalizedOutputAudioPath}"`
+  await spawn({ command: nativeCommand, cwd: process.cwd() })
+  return {
+    inputAudioPath: normalizedInputAudioPath,
+    outputAudioPath: normalizedOutputAudioPath,
+  }
+}
+
+export const splitAudio = async ({
+  inputAudioPath,
+  fragmentDurationMs,
+  cwd,
+}: {
+  inputAudioPath: string
+  fragmentDurationMs: number
+  cwd: string
+}) => {
+  const normalizedInputAudioPath = path.resolve(cwd, inputAudioPath)
+  const totalDurationMs = await getAudioDuration({ audioPath: normalizedInputAudioPath })
+  const fragmentsCount = Math.ceil(totalDurationMs / fragmentDurationMs)
+  const fragmentsPaths: string[] = []
+  for (const i of _.range(fragmentsCount)) {
+    const start = i * fragmentDurationMs
+    const end = Math.min((i + 1) * fragmentDurationMs, totalDurationMs)
+    const fragmentOutputPath = addSuffixToFilePath({ filePath: normalizedInputAudioPath, suffix: `fragment${i}` })
+    await cutAudio({
+      inputAudioPath: normalizedInputAudioPath,
+      outputAudioPath: fragmentOutputPath,
+      start: `${start / 1_000}`,
+      end: `${end / 1_000}`,
+      cwd,
+    })
+    fragmentsPaths.push(fragmentOutputPath)
+  }
+  return {
+    inputAudioPath: normalizedInputAudioPath,
+    fragmentsPaths,
+  }
+}
+
 export const concatSilentVideos = async ({
   inputVideoPaths,
   outputVideoPath,
@@ -327,6 +382,43 @@ export const decutVideo = async ({
   return {
     inputVideoPath: normalizedInputVideoPath,
     outputVideoPath: normalizedOutputVideoPath,
+  }
+}
+
+export const decutAudio = async ({
+  inputAudioPath,
+  outputAudioPath,
+  times,
+  cwd,
+}: {
+  inputAudioPath: string
+  outputAudioPath: string
+  times: Array<[string, string]> // [[00:05:24, 00:06:27], [00:10:51, 00:14:04]]
+  cwd: string
+}) => {
+  const normalizedInputAudioPath = path.resolve(cwd, inputAudioPath)
+  const normalizedOutputAudioPath = path.resolve(cwd, outputAudioPath)
+
+  // Convert time strings to seconds
+  const convertToSeconds = (time: string) => {
+    const [hh, mm, ss] = time.split(':').map(Number)
+    return hh * 3_600 + mm * 60 + ss
+  }
+
+  // Create a filter for select and aselect based on the times array
+  const filterParts = times.map(([start, end]) => {
+    const startSec = convertToSeconds(start)
+    const endSec = convertToSeconds(end)
+    return `between(t,${startSec},${endSec})`
+  })
+
+  const selectFilter = `aselect='not(${filterParts.join('+')})', asetpts=N/SR/TB`
+  const command = `ffmpeg -i "${normalizedInputAudioPath}" -af "${selectFilter}" -y "${normalizedOutputAudioPath}"`
+  await spawn({ command, cwd: process.cwd() })
+
+  return {
+    inputAudioPath: normalizedInputAudioPath,
+    outputAudioPath: normalizedOutputAudioPath,
   }
 }
 
@@ -1217,13 +1309,59 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 export const extractAudioBackground = async ({
   inputAudioPath,
   outputAudioPath,
+  cwd,
+  verbose,
+}: {
+  inputAudioPath: string
+  outputAudioPath: string
+  cwd: string
+  verbose?: boolean
+}) => {
+  verbose && log.normal('Extracting audio background', { inputAudioPath, outputAudioPath })
+  const normalizedInputAudioPath = path.resolve(cwd, inputAudioPath)
+  const normalizedOutputAudioPath = path.resolve(cwd, outputAudioPath)
+  const { fragmentsPaths } = await splitAudio({
+    cwd,
+    fragmentDurationMs: 60_000,
+    inputAudioPath: normalizedInputAudioPath,
+  })
+  const fragmentsBackgroundOutputPaths: string[] = []
+  for (const fragmentPath of fragmentsPaths) {
+    const fragmentBackgroundOutputPath = addSuffixToFilePath({ filePath: fragmentPath, suffix: `background` })
+    fragmentsBackgroundOutputPaths.push(fragmentBackgroundOutputPath)
+    await extractAudioBackgroundFromFragment({
+      inputAudioPath: fragmentPath,
+      outputAudioPath: fragmentBackgroundOutputPath,
+      verbose,
+    })
+  }
+  await concatAudios({
+    audioPaths: fragmentsBackgroundOutputPaths,
+    outputAudioPath: normalizedOutputAudioPath,
+    verbose,
+  })
+  for (const fragmentPath of fragmentsPaths) {
+    await fs.unlink(fragmentPath)
+  }
+  for (const fragmentBackgroundOutputPath of fragmentsBackgroundOutputPaths) {
+    await fs.unlink(fragmentBackgroundOutputPath)
+  }
+  return {
+    inputAudioPath,
+    outputAudioPath,
+  }
+}
+
+export const extractAudioBackgroundFromFragment = async ({
+  inputAudioPath,
+  outputAudioPath,
   verbose,
 }: {
   inputAudioPath: string
   outputAudioPath: string
   verbose?: boolean
 }) => {
-  verbose && log.normal('Extracting audio background', { inputAudioPath, outputAudioPath })
+  verbose && log.normal('Extracting audio background from fragment', { inputAudioPath, outputAudioPath })
   const parsed = parseFileName(outputAudioPath)
   const tempDir = path.resolve(parsed.dirname, 'background-temp')
   await createDir({ cwd: tempDir })

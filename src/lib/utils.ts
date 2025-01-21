@@ -4,7 +4,7 @@ import path from 'path'
 // import { stringsToLikeArrayString } from 'svag-cli-utils'
 import z from 'zod'
 
-export const langsProcessedAllowed = ['ru', 'en', 'es', 'pt', 'it', 'de', 'tr'] as const
+export const langsProcessedAllowed = ['ru', 'en', 'es', 'pt', 'it', 'de', 'tr', 'hi', 'id'] as const
 export const fromRawLang = (lang: string) => {
   if (lang.length === 2) return lang
   if (lang.length === 3 && lang[2] === 'r') return lang.slice(0, 2)

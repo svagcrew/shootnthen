@@ -163,12 +163,14 @@ export const ttsSimpleByElevenlabs = async ({
     en: 'e5WNhrdI30aXpS2RSGm1',
     'en-luis': 'WGINef1wh4Hi6O62bfO8',
     'en-oswald': 'u9krpw4IqW8A8YKLvhYX',
-    ru: '8PCccElp0PQGRfTFCu0p',
+    ru: 'txnCCHHGKmYIwrn7HfHQ',
     es: 'Nh2zY9kknu6z4pZy6FhD',
     pt: 'IlrWo5tGgTuxNTHyGhWD',
     it: '13Cuh3NuYvWOVQtLbRN8',
     de: 'hucVGIVBVgfwHixla7pT',
     tr: 'YXfTfjS5baixEmJfseKO',
+    hi: 'zT03pEAEi0VHKciJODfn',
+    id: 'gP7FRCgEZ8Lr3rnyGgpw',
   }
   // const voiceMapFemale: { [key: string]: string } = {
   //   en: 'en-US-AvaMultilingualNeural',
@@ -267,12 +269,14 @@ export const ttsMegasimpleByElevenlabs = async ({
     en: 'e5WNhrdI30aXpS2RSGm1',
     'en-luis': 'WGINef1wh4Hi6O62bfO8',
     'en-oswald': 'u9krpw4IqW8A8YKLvhYX',
-    ru: '8PCccElp0PQGRfTFCu0p',
+    ru: 'txnCCHHGKmYIwrn7HfHQ',
     es: 'Nh2zY9kknu6z4pZy6FhD',
     pt: 'IlrWo5tGgTuxNTHyGhWD',
     it: '13Cuh3NuYvWOVQtLbRN8',
     de: 'hucVGIVBVgfwHixla7pT',
     tr: 'YXfTfjS5baixEmJfseKO',
+    hi: 'zT03pEAEi0VHKciJODfn',
+    id: 'gP7FRCgEZ8Lr3rnyGgpw',
   }
 
   voiceId = voiceId || (voiceKey ? voiceMap[`${lang}-${voiceKey}`] : voiceMap[lang])
@@ -351,13 +355,15 @@ export const ttsMegasimpleWithTimestampsByElevenlabs = async ({
   // Map language codes to ElevenLabs voice IDs
   const voiceMap: { [key: string]: string } = {
     en: 'e5WNhrdI30aXpS2RSGm1',
-    // ru: '8PCccElp0PQGRfTFCu0p',
+    // ru: 'txnCCHHGKmYIwrn7HfHQ',
     ru: 'sRk0zCqhS2Cmv0bzx5wA',
     es: 'Nh2zY9kknu6z4pZy6FhD',
     pt: 'IlrWo5tGgTuxNTHyGhWD',
     it: '13Cuh3NuYvWOVQtLbRN8',
     de: 'hucVGIVBVgfwHixla7pT',
     tr: 'YXfTfjS5baixEmJfseKO',
+    hi: 'zT03pEAEi0VHKciJODfn',
+    id: 'gP7FRCgEZ8Lr3rnyGgpw',
   }
 
   const voiceId = voiceMap[lang]

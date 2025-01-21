@@ -4,14 +4,20 @@ import { auphonic } from '@/lib/auphonic.js'
 import { ttsByAzureai } from '@/lib/azureai.js'
 import { getConfig } from '@/lib/config.js'
 import {
+  addSilenceToAudio,
   applyAudiosToVideo,
   combineTwoAudios,
+  concatAudios,
   converWavToMp3,
+  cutAudio,
   cutVideo,
+  decutAudio,
   decutVideo,
   extractAudio,
   extractAudioBackground,
+  getAudioDuration,
   getPictureFromVideo,
+  stretchAudioDuration,
 } from '@/lib/editor.js'
 import { elevenlabs } from '@/lib/elevenlabs.dubbing.js'
 import { getVoicesElevenlabs, ttsByElevenlabs } from '@/lib/elevenlabs.general.js'
@@ -130,6 +136,110 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         })
       const { inputVideoPath, outputVideoPath, times, fast } = input
       const result = await decutVideo({ cwd, inputVideoPath, outputVideoPath, times, fast })
+      log.green(result)
+      break
+    }
+    case 'cut-audio': {
+      const input = z
+        .object({
+          inputAudioPath: z.string().min(1),
+          outputAudioPath: z.string().min(1),
+          start: z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+          end: z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+          // fast: z.boolean().optional().default(false),
+        })
+        .parse({
+          inputAudioPath: args[0],
+          outputAudioPath: args[1],
+          start: args[2],
+          end: args[3],
+          // fast: getFlagAsBoolean({
+          //   flags,
+          //   keys: ['fast', 'f'],
+          //   coalesce: false,
+          // }),
+        })
+      const { inputAudioPath, outputAudioPath, start, end } = input
+      const result = await cutAudio({ inputAudioPath, outputAudioPath, start, end, cwd })
+      log.green(result)
+      break
+    }
+    case 'decut-audio': {
+      const timesArgs = args.slice(2) // 00:05:24 00:06:27 00:10:51 00:14:04
+      const input = z
+        .object({
+          inputAudioPath: z.string().min(1),
+          outputAudioPath: z.string().min(1),
+          times: z
+            .array(
+              z.tuple([
+                z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+                z.string().regex(/^\d{2}:\d{2}:\d{2}(\.\d{3})?$/),
+              ])
+            )
+            .min(1),
+        })
+        .parse({
+          inputAudioPath: args[0],
+          outputAudioPath: args[1],
+          times: _.chunk(timesArgs, 2),
+        })
+      const { inputAudioPath, outputAudioPath, times } = input
+      const result = await decutAudio({ cwd, inputAudioPath, outputAudioPath, times })
+      log.green(result)
+      break
+    }
+    case 'audio-duration': {
+      const audioPath = args[0]
+      const result = await getAudioDuration({ audioPath })
+      log.green(result)
+      break
+    }
+    case 'audio-stretch': {
+      const input = z
+        .object({
+          audioPath: z.string().min(1),
+          durationMs: z.number().min(0),
+        })
+        .parse({
+          audioPath: args[0],
+          durationMs: parseFloat(args[1]),
+        })
+      const { audioPath, durationMs } = input
+      const result = await stretchAudioDuration({ audioPath, durationMs })
+      log.green(result)
+      break
+    }
+    case 'audio-add-silence': {
+      const input = z
+        .object({
+          audioPath: z.string().min(1),
+          policy: z.enum(['before', 'after']),
+          silenceDurationMs: z.number().min(0),
+        })
+        .parse({
+          audioPath: args[0],
+          policy: args[1],
+          silenceDurationMs: parseFloat(args[2]),
+        })
+      const { audioPath, policy, silenceDurationMs } = input
+      const result = await addSilenceToAudio({ audioPath, policy, silenceDurationMs })
+      log.green(result)
+      break
+    }
+    case 'audio-concat': {
+      const [arg0, ...restArgs] = args
+      const input = z
+        .object({
+          outputAudioPath: z.string().min(1),
+          audioPaths: z.array(z.string().min(2)),
+        })
+        .parse({
+          outputAudioPath: arg0,
+          audioPaths: restArgs,
+        })
+      const { outputAudioPath, audioPaths } = input
+      const result = await concatAudios({ outputAudioPath, audioPaths, verbose })
       log.green(result)
       break
     }
@@ -321,6 +431,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
         verbose,
         inputAudioPath: path.resolve(cwd, inputAudioPath),
         outputAudioPath: path.resolve(cwd, outputAudioPath),
+        cwd,
       })
       log.green(result)
       break
@@ -1346,7 +1457,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             force,
           })
           lastCommandIndex++
-          const { audioFilePath: dubbedAudioFilePath } = await ttsByAzureai({
+          const { audioFilePath: dubbedAudioFilePath } = await ttsByElevenlabs({
             force,
             config,
             lang: distLang,
@@ -1450,6 +1561,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           await extractAudioBackground({
             inputAudioPath: srcAudioFilePath,
             outputAudioPath: srcBackgroundAudioFilePath,
+            cwd,
           })
         }
         for (const distLang of distLangs) {
@@ -1463,7 +1575,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             force,
           })
           lastCommandIndex++
-          const { audioFilePath: dubbedAudioFilePath } = await ttsByAzureai({
+          const { audioFilePath: dubbedAudioFilePath } = await ttsByElevenlabs({
             force,
             config,
             lang: distLang,
