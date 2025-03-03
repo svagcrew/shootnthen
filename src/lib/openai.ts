@@ -35,7 +35,7 @@ export const completionByOpenai = async <T>({
   userPrompt: string
   jsonSchema?: any
   zodSchema?: z.ZodType<any, any>
-  model?: 'gpt-4o' | 'o1-preview'
+  model?: 'gpt-4o' | 'o1-preview' | 'o1'
 }): Promise<T> => {
   const { openai } = getOpenaiClient()
   const chatMessages: ChatCompletionMessageParam[] = (() => {

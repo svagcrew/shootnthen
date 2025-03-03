@@ -62,12 +62,16 @@ export const extractSrtByRevai = async ({
   return { srtFilePath }
 }
 
+// eslint-disable-next-line n/no-process-env
+let lastKnownJobId = process.env.REVAI_LAST_KNOWN_JOB_ID || ''
+
 export const extractSrtSimpleByRevai = async ({
   // config,
   inputAudioPath,
   outputSrtPath,
   outputJsonPath,
   outputTxtPath,
+  outputRawPath,
   lang,
   translatedLangs,
   verbose,
@@ -77,6 +81,7 @@ export const extractSrtSimpleByRevai = async ({
   outputSrtPath: string
   outputJsonPath: string
   outputTxtPath: string
+  outputRawPath?: string
   lang: string
   translatedLangs: Lang[]
   verbose?: boolean
@@ -86,13 +91,15 @@ export const extractSrtSimpleByRevai = async ({
     throw new Error('REVAI_ACCESS_TOKEN not found')
   }
   const client = new RevAiApiClient(accessToken)
-  verbose && log.normal('Submitting job', { inputAudioPath, lang, translatedLangs })
-  const job = await (async () => {
-    try {
-      return await client.submitJobLocalFile(inputAudioPath, {
-        language: lang,
-        ...(translatedLangs?.length
-          ? {
+  let jobId = ''
+  if (!lastKnownJobId) {
+    verbose && log.normal('Submitting job', { inputAudioPath, lang, translatedLangs })
+    const job = await (async () => {
+      try {
+        return await client.submitJobLocalFile(inputAudioPath, {
+          language: lang,
+          ...(translatedLangs?.length
+            ? {
               translation_config: {
                 target_languages: translatedLangs.map((translatedLang) => ({
                   language: translatedLang,
@@ -100,44 +107,55 @@ export const extractSrtSimpleByRevai = async ({
                 })),
               },
             }
-          : {}),
-      })
-    } catch (error: any) {
-      if (error.message.includes('ECONNRESET')) {
-        verbose && log.normal('ECONNRESET while submitting job')
-        return null
-      } else {
-        throw error
+            : {}),
+        })
+      } catch (error: any) {
+        if (error.message.includes('ECONNRESET')) {
+          verbose && log.normal('ECONNRESET while submitting job')
+          return null
+        } else {
+          throw error
+        }
       }
-    }
-  })()
+    })()
 
-  if (!job) {
-    await extractSrtSimpleByRevai({
-      // config,
-      inputAudioPath,
-      outputSrtPath,
-      outputJsonPath,
-      outputTxtPath,
-      lang,
-      translatedLangs,
-      verbose,
-    })
-    return
+    if (!job) {
+      await extractSrtSimpleByRevai({
+        // config,
+        inputAudioPath,
+        outputSrtPath,
+        outputJsonPath,
+        outputTxtPath,
+        outputRawPath,
+        lang,
+        translatedLangs,
+        verbose,
+      })
+      return
+    }
+
+    jobId = job.id
+  } else {
+    verbose && log.normal('Using last known job id', { lastKnownJobId })
+    jobId = lastKnownJobId
   }
+  // eslint-disable-next-line require-atomic-updates
+  lastKnownJobId = ''
 
   while (true) {
-    verbose && log.normal('Waiting for job', { jobId: job.id })
+    verbose && log.normal('Waiting for job', { jobId })
     await wait(5)
     const jobDetails = await (async () => {
       try {
-        return await client.getJobDetails(job.id)
+        return await client.getJobDetails(jobId)
       } catch (error: any) {
         if (error.message.includes('ECONNRESET')) {
-          verbose && log.normal('ECONNRESET while waiting for job', { jobId: job.id })
+          verbose && log.normal('ECONNRESET while waiting for job', { jobId })
           return { status: 'in_progress' }
         } else {
-          throw error
+          // throw error
+          verbose && log.normal('Unknown error waiting for job', { jobId, error })
+          return { status: 'in_progress' }
         }
       }
     })()
@@ -151,16 +169,24 @@ export const extractSrtSimpleByRevai = async ({
     throw new Error('Job failed')
   }
 
-  verbose && log.normal('Getting original captions', { jobId: job.id })
-  const captionsRaw = await client.getCaptions(job.id)
+  verbose && log.normal('Getting original captions', { jobId })
+  const captionsRaw = await client.getCaptions(jobId)
   await fs.writeFile(outputSrtPath, captionsRaw)
   const captions = await fs.readFile(outputSrtPath, 'utf8')
   const prettifyedCaptions = await prettifySrtContent({ srtContent: captions })
   await fs.writeFile(outputSrtPath, prettifyedCaptions)
-  const json = await client.getTranscriptObject(job.id)
+  const json = await client.getTranscriptObject(jobId)
   await fs.writeFile(outputJsonPath, JSON.stringify(json, null, 2))
-  const txt = await client.getTranscriptText(job.id)
+  const txt = await client.getTranscriptText(jobId)
   await fs.writeFile(outputTxtPath, txt)
+  if (outputRawPath) {
+    const lines = txt.split('\n')
+    // remove first 25 symbols from each line
+    const cuttedLines = lines.map((line) => line.slice(25).trim())
+    const filteredLines = cuttedLines.filter(Boolean)
+    const raw = filteredLines.join('\n')
+    await fs.writeFile(outputRawPath, raw)
+  }
 
   const parsedPath = parseFileName(outputSrtPath)
   const translatedSrtPaths = translatedLangs.map((translatedLang) => {
@@ -183,15 +209,15 @@ export const extractSrtSimpleByRevai = async ({
     const translatedJsonPath = translatedJsonPaths[i]
     const translatedTxtPath = translatedTxtPaths[i]
     await wait(5) // waiting for translated captions
-    verbose && log.normal('Getting translated captions', { jobId: job.id, translatedLang })
-    const translatedCaptionsRaw = await client.getTranslatedCaptions(job.id, translatedLang)
+    verbose && log.normal('Getting translated captions', { jobId, translatedLang })
+    const translatedCaptionsRaw = await client.getTranslatedCaptions(jobId, translatedLang)
     await fs.writeFile(translatedSrtPath, translatedCaptionsRaw)
     const translatedCaptions = await fs.readFile(translatedSrtPath, 'utf8')
     const translatedPrettifyedCaptions = await prettifySrtContent({ srtContent: translatedCaptions })
     await fs.writeFile(translatedSrtPath, translatedPrettifyedCaptions)
-    const translatedJson = await client.getTranslatedTranscriptObject(job.id, translatedLang)
+    const translatedJson = await client.getTranslatedTranscriptObject(jobId, translatedLang)
     await fs.writeFile(translatedJsonPath, JSON.stringify(translatedJson, null, 2))
-    const translatedTxt = await client.getTranslatedTranscriptText(job.id, translatedLang)
+    const translatedTxt = await client.getTranslatedTranscriptText(jobId, translatedLang)
     await fs.writeFile(translatedTxtPath, translatedTxt)
   }
 }
