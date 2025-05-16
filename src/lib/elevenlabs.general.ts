@@ -160,9 +160,12 @@ export const ttsSimpleByElevenlabs = async ({
 
   // Map language codes to voice names
   const voiceMap: { [key: string]: string } = {
-    en: 'e5WNhrdI30aXpS2RSGm1',
+    en: 'wyWA56cQNU2KqUW4eCsI',
+    'en-sam': 'G7ILShrCNLfmS0A37SXS',
+    'en-initial': 'e5WNhrdI30aXpS2RSGm1',
     'en-luis': 'WGINef1wh4Hi6O62bfO8',
     'en-oswald': 'u9krpw4IqW8A8YKLvhYX',
+    'en-clyde': 'wyWA56cQNU2KqUW4eCsI',
     ru: 'txnCCHHGKmYIwrn7HfHQ',
     es: 'Nh2zY9kknu6z4pZy6FhD',
     pt: 'IlrWo5tGgTuxNTHyGhWD',
