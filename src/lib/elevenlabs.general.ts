@@ -21,12 +21,15 @@ import SrtParser from 'srt-parser-2'
 import { isFileExistsSync, log } from 'svag-cli-utils'
 
 const executeTtsTask = async ({
-  policy = 'normalize',
+  // TODO:ASAP
+  // policy = 'normalize',
+  policy,
   ttsTask,
   outputAudioPath,
   verbose,
 }: {
-  policy?: 'stretch' | 'normalize'
+  // policy?: 'stretch' | 'normalize'
+  policy: 'stretch' | 'normalize'
   ttsTask: TtsTask
   outputAudioPath: string
   verbose?: boolean
@@ -88,7 +91,7 @@ export const ttsByElevenlabs = async ({
   lang?: string
   voiceKey?: string
   separateSentences?: boolean
-  policy?: 'stretch' | 'normalize'
+  policy: 'stretch' | 'normalize'
   force?: boolean
   verbose?: boolean
 }) => {
@@ -152,7 +155,7 @@ export const ttsSimpleByElevenlabs = async ({
   srcAudioPath: string
   lang: string
   voiceKey?: string
-  policy?: 'stretch' | 'normalize'
+  policy: 'stretch' | 'normalize'
   separateSentences?: boolean
   verbose?: boolean
 }) => {

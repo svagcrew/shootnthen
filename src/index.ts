@@ -1075,12 +1075,13 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
     // }
 
     case 'tts': {
-      const { lang, srtPath, srcAudioPath, provider } = z
+      const { lang, srtPath, srcAudioPath, provider, stretchPolicy } = z
         .object({
           lang: zLang.optional(),
           srtPath: z.string().min(1),
           srcAudioPath: z.string().min(1),
           provider: z.enum(['azureai', 'elevenlabs']),
+          stretchPolicy: z.enum(['stretch', 'normalize']).default('stretch'),
         })
         .parse({
           lang: getFlagAsString({
@@ -1103,6 +1104,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             keys: ['provider', 'p'],
             coalesce: 'elevenlabs',
           }),
+          stretchPolicy: getFlagAsString({
+            flags,
+            keys: ['stretch-policy'],
+            coalesce: 'stretch',
+          }),
         })
       if (provider === 'elevenlabs') {
         const { audioFilePath } = await ttsByElevenlabs({
@@ -1112,6 +1118,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           verbose,
           srcAudioPath,
           srtPath,
+          policy: stretchPolicy,
         })
         log.green(audioFilePath)
       } else {
@@ -1387,12 +1394,13 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const srcLangRaw = parsedFilePath.langSingle
       const srcSrtFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.srt`)
       const srcAudioFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.mp3`)
-      const { filePath, srcLang, distLangs, skipSrcCommands } = z
+      const { filePath, srcLang, distLangs, skipSrcCommands, stretchPolicy } = z
         .object({
           skipSrcCommands: z.boolean().default(false),
           filePath: z.string().min(1),
           distLangs: z.array(zLangProcessed).min(1),
           srcLang: zLangProcessed,
+          stretchPolicy: z.enum(['stretch', 'normalize']).default('stretch'),
         })
         .parse({
           skipSrcCommands: getFlagAsBoolean({
@@ -1403,6 +1411,11 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
           filePath: filePathRaw,
           distLangs: args[1]?.split(',') || [],
           srcLang: srcLangRaw,
+          stretchPolicy: getFlagAsString({
+            flags,
+            keys: ['stretch-policy'],
+            coalesce: 'stretch',
+          }),
         })
 
       let lastCommandIndex = -1
@@ -1464,6 +1477,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             verbose,
             srcAudioPath: srcAudioFilePath,
             srtPath: distSrtPath,
+            policy: stretchPolicy,
           })
           lastCommandIndex++
           await applyAudiosToVideo({ inputVideoPath: filePath, config, langs: [distLang] })
@@ -1491,18 +1505,24 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
       const srcSrtFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.srt`)
       const srcAudioFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.${srcLangRaw}.mp3`)
       const srcBackgroundAudioFilePath = path.resolve(parsedFilePath.dirname, `${parsedFilePath.name}.background.mp3`)
-      const { filePath, srcLang, distLangs, skipSrcCommands } = z
+      const { filePath, srcLang, distLangs, skipSrcCommands, stretchPolicy } = z
         .object({
           skipSrcCommands: z.boolean().default(false),
           filePath: z.string().min(1),
           distLangs: z.array(zLangProcessed).min(1),
           srcLang: zLangProcessed,
+          stretchPolicy: z.enum(['stretch', 'normalize']).default('stretch'),
         })
         .parse({
           skipSrcCommands: getFlagAsBoolean({
             flags,
             keys: ['skip-src-commands', 's'],
             coalesce: false,
+          }),
+          stretchPolicy: getFlagAsString({
+            flags,
+            keys: ['stretch-policy'],
+            coalesce: 'stretch',
           }),
           filePath: filePathRaw,
           distLangs: args[1]?.split(',') || [],
@@ -1582,6 +1602,7 @@ defineCliApp(async ({ cwd, command, args, argr, flags }) => {
             verbose,
             srcAudioPath: srcAudioFilePath,
             srtPath: distSrtPath,
+            policy: stretchPolicy,
           })
           lastCommandIndex++
           await spawn({

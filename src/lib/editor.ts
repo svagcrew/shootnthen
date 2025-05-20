@@ -467,8 +467,23 @@ export const stretchAudioDuration = async ({
   }
   const srcDurationWithExtra = srcDurationS + 0.001
   const atempo = distDurationS / srcDurationWithExtra
-  const atempoCommand = `ffmpeg -i "${audioPath}" -filter:a "atempo=${atempo}" -y "${audioPathTemp}"`
-  verbose && log.normal('Atemping', { durationMs, audioPath, atempo }, atempoCommand)
+  // const atempoCommand = `ffmpeg -i "${audioPath}" -filter:a "atempo=${atempo}" -y "${audioPathTemp}"`
+  // Calculate how many atempo filters we need and their values
+  const atempoFilters = []
+  let remainingTempo = atempo
+  while (remainingTempo > 2) {
+    atempoFilters.push(2)
+    remainingTempo /= 2
+  }
+  while (remainingTempo < 0.5) {
+    atempoFilters.push(0.5)
+    remainingTempo /= 0.5
+  }
+  atempoFilters.push(remainingTempo)
+  // Create the filter chain
+  const filterChain = atempoFilters.map((t) => `atempo=${t}`).join(',')
+  const atempoCommand = `ffmpeg -i "${audioPath}" -filter:a "${filterChain}" -y "${audioPathTemp}"`
+  verbose && log.normal('Atemping', { durationMs, audioPath, atempo, atempoFilters }, atempoCommand)
   await spawn({ command: atempoCommand, cwd: process.cwd() })
 
   // replace original with temp
